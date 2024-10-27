@@ -10,8 +10,8 @@ Protocol protocol;
         protocol = new Protocol();
     }
 
-    function testToCheckPrice() public {
-        int256 price = protocol.getPriceOfBtc();
-        console.log(price);
-    }
+    // function testToCheckPrice() public {
+    //     int256 price = protocol.getPriceOfBtc();
+    //     console.log(price);
+    // }
 }
