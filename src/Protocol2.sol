@@ -80,6 +80,8 @@ using SignedMath for int256;
 
     address constant BTC = 0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43; // Price Feed adress for BTC/USD
     uint256 constant LEVERAGE_RATE = 15; // Leverage rate if 10$ can open the position for $150
+    uint256 constant LIQUIDITY_THRESHOLD = 15; // if total supply is 100, lp's have to keep 15% in the pool any loses (15+lose) (15 - profit)
+
     uint256 constant PRICE_PRECISION = 1e10;
     uint256 constant PRECISION = 1e18;
     
@@ -256,6 +258,26 @@ using SignedMath for int256;
 
     }
 
+        function liquidityReservesToHold() external view returns  (uint256 amountToHold){
+        // uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
+        // uint256 totalPositionsSize = longPosition.totalSize + shortPosition.totalSize;
+        int256 PnLForLong = _checkPnLForLong(toInt256(longPosition.totalSize), toInt256(longPosition.totalSizeOfToken));
+        int256 PnLForShort = _checkPnLForShort(toInt256(shortPosition.totalSize), toInt256(shortPosition.totalSizeOfToken));
+        int256 totalPnL = PnLForLong + PnLForShort;
+        uint256 amountToKeep = _getAmountToHoldInPool();
+        if(totalPnL > 0){
+            uint256 profit = totalPnL.abs();
+            amountToHold = amountToKeep - profit;
+        } else if(totalPnL == 0) {
+            amountToHold = amountToKeep;
+        } else {
+            uint256 loss = totalPnL.abs();
+            amountToHold = amountToKeep + loss;
+        }
+
+        return amountToHold;
+        }
+
 
 
 
@@ -267,17 +289,7 @@ using SignedMath for int256;
     //////////////////////////
 
     // functions to check reserves to open Positions
-    function _liquidityReservesRemaining(uint256 amountWantToWithDraw) internal view returns (uint256 utilRate){
-        uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
-        // uint256 totalPositionsSize = longPosition.totalSize + shortPosition.totalSize;
-        int256 PnLForLong = _checkPnLForLong(toInt256(longPosition.totalSize), toInt256(longPosition.totalSizeOfToken));
-        int256 PnLForShort = _checkPnLForShort(toInt256(shortPosition.totalSize), toInt256(shortPosition.totalSizeOfToken));
-        int256 totalPnL = PnLForLong + PnLForShort;
-        // if(totalPnL > 0){            return totalPnL.abs();}
-        
 
-        // return (totalPositionsSize/ totalReserve );
-    }
 
     // Function to check PnL
       function _checkProfitOrLossForUser(address user) internal view returns(int256){
@@ -296,6 +308,13 @@ using SignedMath for int256;
         return PnL;
     }
 
+
+    function _getAmountToHoldInPool() internal view returns(uint256 amountToKeep){
+        uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
+        amountToKeep = (totalReserve/100) * LIQUIDITY_THRESHOLD;
+        return amountToKeep;
+    }
+
     // Increase  total positions
       function _increaseTotalLongPosition(uint256 _size, uint256 _numOfToken ) internal {
             longPosition.totalSize += _size;
@@ -306,7 +325,7 @@ using SignedMath for int256;
             shortPosition.totalSizeOfToken += _numOfToken;
         }
 
-
+        
 
     /**@dev Liquidate User */
     function _liquidateUser(address user, uint256 lossToCover) internal returns(bool){

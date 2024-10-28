@@ -10,10 +10,12 @@ import {Protocol2} from "src/Protocol2.sol";
 
 contract Vault is ERC4626 {
 
-    error Protocol__AlreadyUpdated();
-    error Protocol__OnlyAdminCanUpdate();
+    error Vault__AlreadyUpdated();
+    error Vault__OnlyAdminCanUpdate();
+    error Vault__WithdrawLimitAffectingReserveThreshold();
 
-    Protocol2 private immutable i_protocol;
+
+    Protocol2 private protocol;
     address immutable i_ADMIN; // Admin to update Vault Address
     address private protocolAddress;
     bool private alreadyUpdated = false;
@@ -26,8 +28,8 @@ contract Vault is ERC4626 {
 
 
         function updateProtocolAddress(address _protocolAddress) external {
-        if(alreadyUpdated) revert Protocol__AlreadyUpdated();
-        if(msg.sender != i_ADMIN) revert Protocol__OnlyAdminCanUpdate();
+        if(alreadyUpdated) revert Vault__AlreadyUpdated();
+        if(msg.sender != i_ADMIN) revert Vault__OnlyAdminCanUpdate();
 
         protocolAddress = _protocolAddress;
         alreadyUpdated = true;
@@ -44,6 +46,12 @@ contract Vault is ERC4626 {
             revert ERC4626ExceededMaxWithdraw(owner, assets, maxAssets);
         }
 
+        uint256 amountToHold = Protocol2(protocolAddress).liquidityReservesToHold();
+        uint256 totalSupplyOfToken = totalSupply();
+        if((totalSupplyOfToken - assets) < amountToHold){
+            revert Vault__WithdrawLimitAffectingReserveThreshold();
+        }
+
         uint256 shares = previewWithdraw(assets);
         _withdraw(_msgSender(), receiver, owner, assets, shares);
 
@@ -58,6 +66,12 @@ contract Vault is ERC4626 {
         }
 
         uint256 assets = previewRedeem(shares);
+        uint256 amountToHold = Protocol2(protocolAddress).liquidityReservesToHold();
+        uint256 totalSupplyOfToken = totalSupply();
+        if((totalSupplyOfToken - assets) < amountToHold){
+            revert Vault__WithdrawLimitAffectingReserveThreshold();
+        }
+
         _withdraw(_msgSender(), receiver, owner, assets, shares);
 
         return assets;
