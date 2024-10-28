@@ -40,6 +40,7 @@ contract Protocol2 is ReentrancyGuard {
 // errors
 error Protocol__NeedsMoreThanZero();    
 error Protocol__FundsNotAvailableForPosition();    
+error Protocol__CurrentlyNumberIsZero();    
 
 error Protocol__DepositFailed();
 error Protocol__RedeemFailed();
@@ -48,6 +49,9 @@ error Protocol__LeverageLimitReached();
 error Protocol__UserNotEnoughBalance();
 error Protocol__CannotWithdrawWithOpenPosition();
 error Protocol__OpenPositionFirst();
+error Protocol__AlreadyUpdated();
+error Protocol__OnlyAdminCanUpdate();
+
 
 
 using SignedMath for int256;
@@ -78,7 +82,7 @@ using SignedMath for int256;
     // State variables 
     //////////////////////////
 
-    address constant BTC = 0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43; // Price Feed adress for BTC/USD
+    // address constant BTC = 0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43; // Price Feed adress for BTC/USD
     uint256 constant LEVERAGE_RATE = 15; // Leverage rate if 10$ can open the position for $150
     uint256 constant LIQUIDITY_THRESHOLD = 15; // if total supply is 100, lp's have to keep 15% in the pool any loses (15+lose) (15 - profit)
 
@@ -87,7 +91,11 @@ using SignedMath for int256;
     
 
     address immutable i_acceptedCollateral;
+    address immutable i_ADMIN; // Admin to update Vault Address
+    address immutable i_BTC;
+
  
+    bool private alreadyUpdated = false;
 
 
     mapping(address => Position) positions;  
@@ -125,16 +133,25 @@ using SignedMath for int256;
     // }
 
 
-    constructor(address collateralAddress, Vault _vault) {
+    constructor(address collateralAddress, address _i_ADMIN, address btc) {
+
         i_acceptedCollateral = collateralAddress;
-        vault = _vault;
+        i_ADMIN = _i_ADMIN;
+        i_BTC = btc;
+      
     }
 
     //////////////////////////
     // External Functions
     //////////////////////////
 
+    function updateVaultAddress(address _vaultAddress) external {
+        if(alreadyUpdated) revert Protocol__AlreadyUpdated();
+        if(msg.sender != i_ADMIN) revert Protocol__OnlyAdminCanUpdate();
+        vault = Vault(_vaultAddress);
+        alreadyUpdated = true;
 
+    }
 
 
     // Prior using this function provide allowance to this contract. 
@@ -259,7 +276,8 @@ using SignedMath for int256;
     }
 
         function liquidityReservesToHold() external view returns  (uint256 amountToHold){
-        // uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
+        uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
+        if(totalReserve == 0) revert Protocol__CurrentlyNumberIsZero();
         // uint256 totalPositionsSize = longPosition.totalSize + shortPosition.totalSize;
         int256 PnLForLong = _checkPnLForLong(toInt256(longPosition.totalSize), toInt256(longPosition.totalSizeOfToken));
         int256 PnLForShort = _checkPnLForShort(toInt256(shortPosition.totalSize), toInt256(shortPosition.totalSizeOfToken));
@@ -355,11 +373,7 @@ using SignedMath for int256;
         }
 
 
-    // function transfer(address to, uint256 amount) external returns (bool);
 
-    // function convertToUint(int256 _num) public pure returns (uint256) {
-    //     return _num.abs();
-    // }
 
     // To convert the value of uint256 to int256 safely
     function toInt256(uint256 value) internal pure returns (int256) {
@@ -413,7 +427,7 @@ using SignedMath for int256;
     }
 
     function _getPriceOfBtc() internal view returns(uint256 price) {
-    (, int256 answer,,,) = AggregatorV3Interface(BTC).latestRoundData();
+    (, int256 answer,,,) = AggregatorV3Interface(i_BTC).latestRoundData();
      price = uint256(answer); // price return amount with e8 (correcting it)
     return price * PRICE_PRECISION;
     }
@@ -421,6 +435,10 @@ using SignedMath for int256;
     //////////////////////////
     // Getters and View function
     //////////////////////////
+
+    function getVaultAddress() public view returns(address){
+        return address(vault);
+    }
 
     function getPriceOfBtc() public view returns(uint256 price) {
         return _getPriceOfBtc();
@@ -437,5 +455,8 @@ using SignedMath for int256;
             return _checkLeverageFactorForExisting(sender,_size);
         }
     }
+
+
+    
 
 }

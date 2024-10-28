@@ -10,31 +10,28 @@ import {Protocol2} from "src/Protocol2.sol";
 
 contract Vault is ERC4626 {
 
-    error Vault__AlreadyUpdated();
-    error Vault__OnlyAdminCanUpdate();
+  
     error Vault__WithdrawLimitAffectingReserveThreshold();
 
 
     Protocol2 private protocol;
-    address immutable i_ADMIN; // Admin to update Vault Address
-    address private protocolAddress;
-    bool private alreadyUpdated = false;
 
-    constructor(address assetAddr, address _i_ADMIN) ERC20 ("LP's Token", "LPT")ERC4626 (IERC20(assetAddr)) {
+    constructor(address assetAddr, Protocol2 _protocol) ERC20 ("LP's Token", "LPT")ERC4626 (IERC20(assetAddr)) {
         // Allowance so the protocol can withdraw money
-        IERC20(assetAddr).approve(protocolAddress, type(uint256).max);
-        i_ADMIN = _i_ADMIN;
+        protocol = _protocol;
+        IERC20(assetAddr).approve(address(protocol), type(uint256).max);
+     
     }
 
 
-        function updateProtocolAddress(address _protocolAddress) external {
-        if(alreadyUpdated) revert Vault__AlreadyUpdated();
-        if(msg.sender != i_ADMIN) revert Vault__OnlyAdminCanUpdate();
+    //     function updateProtocolAddress(address _protocolAddress) external {
+    //     if(alreadyUpdated) revert Vault__AlreadyUpdated();
+    //     if(msg.sender != i_ADMIN) revert Vault__OnlyAdminCanUpdate();
 
-        protocolAddress = _protocolAddress;
-        alreadyUpdated = true;
+    //     protocolAddress = _protocolAddress;
+    //     alreadyUpdated = true;
 
-    }
+    // }
     
 
 
@@ -46,7 +43,7 @@ contract Vault is ERC4626 {
             revert ERC4626ExceededMaxWithdraw(owner, assets, maxAssets);
         }
 
-        uint256 amountToHold = Protocol2(protocolAddress).liquidityReservesToHold();
+        uint256 amountToHold = protocol.liquidityReservesToHold();
         uint256 totalSupplyOfToken = totalSupply();
         if((totalSupplyOfToken - assets) < amountToHold){
             revert Vault__WithdrawLimitAffectingReserveThreshold();
@@ -66,7 +63,7 @@ contract Vault is ERC4626 {
         }
 
         uint256 assets = previewRedeem(shares);
-        uint256 amountToHold = Protocol2(protocolAddress).liquidityReservesToHold();
+        uint256 amountToHold = protocol.liquidityReservesToHold();
         uint256 totalSupplyOfToken = totalSupply();
         if((totalSupplyOfToken - assets) < amountToHold){
             revert Vault__WithdrawLimitAffectingReserveThreshold();
