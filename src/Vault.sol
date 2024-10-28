@@ -5,16 +5,33 @@ import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.so
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {Protocol2} from "src/Test.sol";
+import {Protocol2} from "src/Protocol2.sol";
 
 
 contract Vault is ERC4626 {
-Protocol2 private immutable i_protocol;
 
-    constructor(address assetAddr, Protocol2 _protocol) ERC20 ("LP's Token", "LPT")ERC4626 (IERC20(assetAddr)) {
-        i_protocol = _protocol;
+    error Protocol__AlreadyUpdated();
+    error Protocol__OnlyAdminCanUpdate();
+
+    Protocol2 private immutable i_protocol;
+    address immutable i_ADMIN; // Admin to update Vault Address
+    address private protocolAddress;
+    bool private alreadyUpdated = false;
+
+    constructor(address assetAddr, address _i_ADMIN) ERC20 ("LP's Token", "LPT")ERC4626 (IERC20(assetAddr)) {
         // Allowance so the protocol can withdraw money
-        IERC20(assetAddr).approve(address(i_protocol), type(uint256).max);
+        IERC20(assetAddr).approve(protocolAddress, type(uint256).max);
+        i_ADMIN = _i_ADMIN;
+    }
+
+
+        function updateProtocolAddress(address _protocolAddress) external {
+        if(alreadyUpdated) revert Protocol__AlreadyUpdated();
+        if(msg.sender != i_ADMIN) revert Protocol__OnlyAdminCanUpdate();
+
+        protocolAddress = _protocolAddress;
+        alreadyUpdated = true;
+
     }
     
 

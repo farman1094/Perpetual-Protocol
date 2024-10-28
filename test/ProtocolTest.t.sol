@@ -2,11 +2,12 @@
 pragma solidity ^0.8.24;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Protocol2} from "src/Test.sol";
+import {Protocol2} from "src/Protocol2.sol";
 
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Vault} from "src/Vault.sol";
+
 import {Script} from "forge-std/Script.sol";
 import {console} from "forge-std/console.sol";
 import {MockERC20} from "test/mocks/MockERC20.sol";
@@ -14,14 +15,15 @@ import {MockERC20} from "test/mocks/MockERC20.sol";
 contract ProtocolTest is Test {
 Protocol2 protocol;
 IERC20 token;
-IERC4626 vault;
+Vault vault;
 address user = makeAddr("user");
 address user2 = makeAddr("user2");
     function setUp() public {
         vm.startBroadcast(msg.sender);
-        protocol = new Protocol2(address(0), address(1));
+        
          token = new MockERC20();
-         vault = new Vault(address(token), protocol);
+         vault = new Vault(address(token), msg.sender);
+        protocol = new Protocol2(address(token), vault);
         vm.stopBroadcast();
     }
 

@@ -26,13 +26,21 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {SignedMath} from "@openzeppelin/contracts/utils/math/SignedMath.sol";
 import { AggregatorV3Interface } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {Vault} from "src/Vault.sol";
+
+/**
+ * @title PrepProtocol
+ * @author Mohd Farman
+ * This system is designed to be as minimal as possible.
+ */
 
 
 contract Protocol2 is ReentrancyGuard {
 
-error Protocol__NeedsMoreThanZero();
-error Protocol__AlreadyUpdated();
-error Protocol__OnlyAdminCanUpdate();
+// errors
+error Protocol__NeedsMoreThanZero();    
+error Protocol__FundsNotAvailableForPosition();    
+
 error Protocol__DepositFailed();
 error Protocol__RedeemFailed();
 error Protocol__LiquidationFailed();
@@ -44,11 +52,7 @@ error Protocol__OpenPositionFirst();
 
 using SignedMath for int256;
 
-/**
- * @title PrepProtocol
- * @author Mohd Farman
- * This system is designed to be as minimal as possible.
- */
+
 
     struct Position  {
         uint256 size;   // BorrowedMoney
@@ -68,7 +72,7 @@ using SignedMath for int256;
     }
 
 
-
+    Vault private vault;
 
     //////////////////////////
     // State variables 
@@ -81,9 +85,7 @@ using SignedMath for int256;
     
 
     address immutable i_acceptedCollateral;
-    address immutable i_ADMIN; // Admin to update Vault Address
-    address private vaultAddress;
-    bool private alreadyUpdated = false;
+ 
 
 
     mapping(address => Position) positions;  
@@ -111,10 +113,19 @@ using SignedMath for int256;
         _;
     }
 
+    // modifier checkFunds(uint256 _size) {
+    //     uint256 availableBorrowing = _liquidityReservesRemaining();
+    //     if(availableBorrowing < _size){
+    //         revert Protocol__FundsNotAvailableForPosition();
+    //     }
+    //     _;
 
-    constructor(address _i_ADMIN, address collateralAddress) {
-        i_ADMIN = _i_ADMIN;
+    // }
+
+
+    constructor(address collateralAddress, Vault _vault) {
         i_acceptedCollateral = collateralAddress;
+        vault = _vault;
     }
 
     //////////////////////////
@@ -122,14 +133,7 @@ using SignedMath for int256;
     //////////////////////////
 
 
-    function updateProtocolAddress(address _vaultAddress) external {
-        if(alreadyUpdated) revert Protocol__AlreadyUpdated();
-        if(msg.sender != i_ADMIN) revert Protocol__OnlyAdminCanUpdate();
 
-        vaultAddress = _vaultAddress;
-        alreadyUpdated = true;
-
-    }
 
     // Prior using this function provide allowance to this contract. 
     function depositCollateral(uint256 amount) external moreThanZero(amount) nonReentrant {
@@ -140,7 +144,7 @@ using SignedMath for int256;
         if (!success) revert Protocol__DepositFailed();
     }
 
-    function increasePosition(uint256 _size) moreThanZero (_size) external {
+    function increasePosition(uint256 _size) moreThanZero (_size)  external {
             Position memory UserPosition = positions[msg.sender];
             if(UserPosition.isInitialized == false){
                 revert Protocol__OpenPositionFirst();
@@ -152,18 +156,19 @@ using SignedMath for int256;
             positions[msg.sender].sizeOfToken += numOfToken;
 
             if(positions[msg.sender].isLong){
-            longPosition.totalSize += positions[msg.sender].size;
-            longPosition.totalSizeOfToken += positions[msg.sender].sizeOfToken;
-        } else {
-            shortPosition.totalSize += positions[msg.sender].size;
-            shortPosition.totalSizeOfToken += positions[msg.sender].sizeOfToken;
-        } 
+                _increaseTotalLongPosition(_size, numOfToken);
+            } else {
+                _increaseTotalShortPosition(_size, numOfToken);    
+            } 
     }
 
     function openPosition(uint256 _size, bool _isLong) moreThanZero(_size) external {
+
         // CEI
         bool eligible = checkLeverageFactor(msg.sender, _size);
         if (!eligible) revert Protocol__LeverageLimitReached();
+
+
         uint256 numOfToken = _getNumOfTokenByAmount(_size);
         if(_isLong) { // position for long
         positions[msg.sender] = Position({
@@ -181,14 +186,14 @@ using SignedMath for int256;
         });
         }
         emit PositionOpened( msg.sender, _size);
+
+      
         
         // get the total of short or long;
         if(positions[msg.sender].isLong){
-            longPosition.totalSize += _size;
-            longPosition.totalSizeOfToken += numOfToken;
+            _increaseTotalLongPosition(_size, numOfToken);
         } else {
-            shortPosition.totalSize += _size;
-            shortPosition.totalSizeOfToken += numOfToken;
+            _increaseTotalShortPosition(_size, numOfToken);    
         } 
         
         s_numOfOpenPositions++;
@@ -200,16 +205,21 @@ using SignedMath for int256;
     if(userToClose.isInitialized == false){
         revert Protocol__OpenPositionFirst();
     }
-    // Profit calculate differently
-        int256 borrowedAmount = toInt256(userToClose.size);
-        int256 currValueOfToken = toInt256(_getPriceOfBtc() * userToClose.sizeOfToken);
-        int256 PnL;
-    if(userToClose.isLong) {
-        PnL = _checkPnLForLong(borrowedAmount, currValueOfToken);
-    } else {
-        PnL = _checkPnLForShort(borrowedAmount, currValueOfToken);
-    }
 
+  
+    int256 PnL = _checkProfitOrLossForUser(msg.sender);
+  
+
+    // Update the total Accounting 
+        if(userToClose.isLong) {
+            longPosition.totalSize -= userToClose.size;
+            longPosition.totalSizeOfToken -= userToClose.sizeOfToken;
+        } else {
+            shortPosition.totalSize -= userToClose.size;
+            shortPosition.totalSizeOfToken -= userToClose.sizeOfToken;
+        }
+
+    /**@dev reset the mapping */
     delete positions[msg.sender]; //confirm the position
     s_numOfOpenPositions--;
     emit PositionClose(msg.sender, userToClose.size);
@@ -217,14 +227,14 @@ using SignedMath for int256;
     
         uint256 profit = PnL.abs(); // convert int to uint256
         s_collateralOfUser[msg.sender] += profit;
-        IERC20(i_acceptedCollateral).transferFrom(vaultAddress, address(this), profit);
+        IERC20(i_acceptedCollateral).transferFrom(address(vault), address(this), profit);
 
     } else { // assuming if PnL ==0 no changes required just delete /*else if (PnL == 0) {}*/
 
         uint256 loss = PnL.abs();
-       bool success = _liquidateUser(msg.sender, loss);
+        bool success = _liquidateUser(msg.sender, loss);
         if(!success) revert Protocol__RedeemFailed();
-        }
+    }
     
     }
 
@@ -246,12 +256,57 @@ using SignedMath for int256;
 
     }
 
+
+
+
   
 
 
     //////////////////////////
     // Internals Functions
     //////////////////////////
+
+    // functions to check reserves to open Positions
+    function _liquidityReservesRemaining(uint256 amountWantToWithDraw) internal view returns (uint256 utilRate){
+        uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
+        // uint256 totalPositionsSize = longPosition.totalSize + shortPosition.totalSize;
+        int256 PnLForLong = _checkPnLForLong(toInt256(longPosition.totalSize), toInt256(longPosition.totalSizeOfToken));
+        int256 PnLForShort = _checkPnLForShort(toInt256(shortPosition.totalSize), toInt256(shortPosition.totalSizeOfToken));
+        int256 totalPnL = PnLForLong + PnLForShort;
+        // if(totalPnL > 0){            return totalPnL.abs();}
+        
+
+        // return (totalPositionsSize/ totalReserve );
+    }
+
+    // Function to check PnL
+      function _checkProfitOrLossForUser(address user) internal view returns(int256){
+        Position memory userCheck = positions[user];
+        
+        int256 borrowedAmount = toInt256(userCheck.size);
+        int256 currValueOfToken = toInt256(_getPriceOfBtc() * userCheck.sizeOfToken);
+        int256 PnL;
+
+        // Profit calculate differently
+        if(userCheck.isLong) {
+            PnL = _checkPnLForLong(borrowedAmount, currValueOfToken);
+        } else {
+            PnL = _checkPnLForShort(borrowedAmount, currValueOfToken);
+        }
+        return PnL;
+    }
+
+    // Increase  total positions
+      function _increaseTotalLongPosition(uint256 _size, uint256 _numOfToken ) internal {
+            longPosition.totalSize += _size;
+            longPosition.totalSizeOfToken += _numOfToken;
+        }
+          function _increaseTotalShortPosition(uint256 _size, uint256 _numOfToken ) internal {
+            shortPosition.totalSize += _size;
+            shortPosition.totalSizeOfToken += _numOfToken;
+        }
+
+
 
     /**@dev Liquidate User */
     function _liquidateUser(address user, uint256 lossToCover) internal returns(bool){
@@ -264,7 +319,7 @@ using SignedMath for int256;
             amountToCover = s_collateralOfUser[user];
          }
             s_collateralOfUser[user] -= amountToCover;
-            bool success = _redeemCollateral(address(vaultAddress), amountToCover);
+            bool success = _redeemCollateral(address(vault), amountToCover);
             return success;
     }
 
@@ -279,6 +334,7 @@ using SignedMath for int256;
             return PnL;
 
         }
+
 
     // function transfer(address to, uint256 amount) external returns (bool);
 
