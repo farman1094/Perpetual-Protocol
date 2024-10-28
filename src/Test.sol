@@ -211,6 +211,7 @@ using SignedMath for int256;
     }
 
     delete positions[msg.sender]; //confirm the position
+    s_numOfOpenPositions--;
     emit PositionClose(msg.sender, userToClose.size);
     if (PnL > 0){
     
