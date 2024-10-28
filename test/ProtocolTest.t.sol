@@ -7,6 +7,7 @@ import {Protocol2} from "src/Protocol2.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Vault} from "src/Vault.sol";
+import {PrepToken} from "src/PrepToken.sol";
 
 import {Script} from "forge-std/Script.sol";
 import {console} from "forge-std/console.sol";
@@ -15,7 +16,7 @@ import {MockPriceFeed} from "test/mocks/MockPriceFeed.sol";
 
 contract ProtocolTest is Test {
 Protocol2 protocol;
-IERC20 token;
+PrepToken token;
 Vault vault;
 MockPriceFeed feed;
 address user = makeAddr("user");
@@ -23,7 +24,7 @@ address user2 = makeAddr("user2");
     function setUp() public {
         vm.startBroadcast(msg.sender);
         feed = new MockPriceFeed();
-        token = new MockERC20();
+        token = new PrepToken();
         protocol = new Protocol2(address(token), msg.sender, address(feed));
         vault = new Vault(address(token), protocol);
         protocol.updateVaultAddress(address(vault));
@@ -35,6 +36,37 @@ address user2 = makeAddr("user2");
         address vaultAddr = protocol.getVaultAddress();
         assert (vaultAddr == address(vault));
     }
+
+    function testDepositCollateralAndOpenPosition() public {
+        vm.startPrank(msg.sender);
+        token.mint();
+        token.approve(address(protocol), 100 ether);
+        protocol.depositCollateral(100 ether);
+        assert(protocol.getCollateralBalance(msg.sender) == 100 ether);
+        // protocol.withdrawCollateral(100 ether);
+
+        // Opening Positions ------------------------------------
+        protocol.openPosition(1500 ether, true);
+        assert(protocol.getNumOfOpenPositions() == 1);
+
+        (uint256 size, uint256 sizeOfToken, bool isLong) = protocol.getPositionDetails(msg.sender);
+        console.log("size:", size);
+        console.log("sizeOfToken:", sizeOfToken);
+        if(isLong) console.log("isLong: TRUE");
+    
+        (uint256 totalSize, uint256 totalSizeOfToken) = protocol.getTotalLongPositions();   
+        console.log(totalSize,"totalSize");
+        console.log(totalSizeOfToken, "totalSizeOfToken");
+
+        // Closing Positions -----------------------------------
+        protocol.closePosition();
+        vm.stopPrank();
+        }
+
+
+
+
+
 
 
 //    function testtingERC4626() public view {

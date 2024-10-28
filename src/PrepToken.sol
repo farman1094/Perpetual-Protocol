@@ -17,7 +17,7 @@ contract PrepToken is ERC20 {
         if(block.timestamp > (lastMintedAt[msg.sender] + 1 days)){
             revert PrepToken__OnlyMintAfter1Day(block.timestamp);
         }
-        _mint(msg.sender, 5 ether);
+        _mint(msg.sender, 100 ether);
         lastMintedAt[msg.sender] = block.timestamp;
     }
 

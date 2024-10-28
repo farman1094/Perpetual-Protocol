@@ -27,6 +27,8 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {SignedMath} from "@openzeppelin/contracts/utils/math/SignedMath.sol";
 import { AggregatorV3Interface } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {Vault} from "src/Vault.sol";
+import {console} from "forge-std/console.sol";
+
 
 /**
  * @title PrepProtocol
@@ -123,14 +125,6 @@ using SignedMath for int256;
         _;
     }
 
-    // modifier checkFunds(uint256 _size) {
-    //     uint256 availableBorrowing = _liquidityReservesRemaining();
-    //     if(availableBorrowing < _size){
-    //         revert Protocol__FundsNotAvailableForPosition();
-    //     }
-    //     _;
-
-    // }
 
 
     constructor(address collateralAddress, address _i_ADMIN, address btc) {
@@ -227,6 +221,7 @@ using SignedMath for int256;
 
   
     int256 PnL = _checkProfitOrLossForUser(msg.sender);
+    console.log(PnL);
   
 
     // Update the total Accounting 
@@ -240,6 +235,7 @@ using SignedMath for int256;
 
     /**@dev reset the mapping */
     delete positions[msg.sender]; //confirm the position
+
     s_numOfOpenPositions--;
     emit PositionClose(msg.sender, userToClose.size);
     if (PnL > 0){
@@ -248,7 +244,7 @@ using SignedMath for int256;
         s_collateralOfUser[msg.sender] += profit;
         IERC20(i_acceptedCollateral).transferFrom(address(vault), address(this), profit);
 
-    } else { // assuming if PnL ==0 no changes required just delete /*else if (PnL == 0) {}*/
+    } else if (PnL < 0){ // assuming if PnL ==0 no changes required just delete /*else if (PnL == 0) {}*/
 
         uint256 loss = PnL.abs();
         bool success = _liquidateUser(msg.sender, loss);
@@ -268,7 +264,9 @@ using SignedMath for int256;
     
         if(s_collateralOfUser[msg.sender] < _amount) {
             revert Protocol__UserNotEnoughBalance();
-            }
+        }
+
+        s_collateralOfUser[msg.sender] -= _amount;
 
         bool success = _redeemCollateral(msg.sender, _amount);
         if(!success) revert Protocol__RedeemFailed();
@@ -306,15 +304,13 @@ using SignedMath for int256;
     // Internals Functions
     //////////////////////////
 
-    // functions to check reserves to open Positions
-
-
     // Function to check PnL
       function _checkProfitOrLossForUser(address user) internal view returns(int256){
         Position memory userCheck = positions[user];
         
         int256 borrowedAmount = toInt256(userCheck.size);
-        int256 currValueOfToken = toInt256(_getPriceOfBtc() * userCheck.sizeOfToken);
+        int256 currValueOfToken = toInt256((_getPriceOfBtc() * userCheck.sizeOfToken)/1e18);
+        console.log(currValueOfToken);
         int256 PnL;
 
         // Profit calculate differently
@@ -436,6 +432,28 @@ using SignedMath for int256;
     // Getters and View function
     //////////////////////////
 
+    function getTotalLongPositions() public view returns(uint256 totalSize, uint256 totalSizeOfToken) {
+        totalSize = longPosition.totalSize;
+        totalSizeOfToken = longPosition.totalSizeOfToken;
+        return(totalSize, totalSizeOfToken);
+    }
+
+
+    function getPositionDetails(address user) public view returns (uint256 size, uint256 sizeOfToken, bool isLong) {
+        size = positions[user].size;
+        sizeOfToken = positions[user].sizeOfToken;
+        isLong = positions[user].isLong;
+        return (size, sizeOfToken, isLong);
+    }
+    
+
+    function getNumOfOpenPositions() public view returns(uint256){
+        return s_numOfOpenPositions;
+    }
+
+    function getCollateralBalance(address _user) public view returns(uint256){
+        return s_collateralOfUser[_user];
+    }
     function getVaultAddress() public view returns(address){
         return address(vault);
     }
