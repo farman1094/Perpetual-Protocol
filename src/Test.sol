@@ -24,21 +24,25 @@ pragma solidity ^0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {SignedMath} from "@openzeppelin/contracts/utils/math/SignedMath.sol";
 import { AggregatorV3Interface } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
 
-contract Protocol is ReentrancyGuard {
+contract Protocol2 is ReentrancyGuard {
 
 error Protocol__NeedsMoreThanZero();
+error Protocol__AlreadyUpdated();
+error Protocol__OnlyAdminCanUpdate();
 error Protocol__DepositFailed();
 error Protocol__RedeemFailed();
+error Protocol__LiquidationFailed();
 error Protocol__LeverageLimitReached();
 error Protocol__UserNotEnoughBalance();
 error Protocol__CannotWithdrawWithOpenPosition();
 error Protocol__OpenPositionFirst();
 
 
-
+using SignedMath for int256;
 
 /**
  * @title PrepProtocol
@@ -74,8 +78,13 @@ error Protocol__OpenPositionFirst();
     uint256 constant LEVERAGE_RATE = 15; // Leverage rate if 10$ can open the position for $150
     uint256 constant PRICE_PRECISION = 1e10;
     uint256 constant PRECISION = 1e18;
+    
 
     address immutable i_acceptedCollateral;
+    address immutable i_ADMIN; // Admin to update Vault Address
+    address private vaultAddress;
+    bool private alreadyUpdated = false;
+
 
     mapping(address => Position) positions;  
     mapping(address => uint256)  s_collateralOfUser;
@@ -89,6 +98,7 @@ error Protocol__OpenPositionFirst();
     // Events
     event CollateralDeposited (address indexed sender, uint256 amount);
     event PositionOpened (address indexed sender, uint256 size);
+    event PositionClose (address indexed user, uint256 size);
 
 
 
@@ -102,13 +112,24 @@ error Protocol__OpenPositionFirst();
     }
 
 
-    constructor(address collateralAddress) {
+    constructor(address _i_ADMIN, address collateralAddress) {
+        i_ADMIN = _i_ADMIN;
         i_acceptedCollateral = collateralAddress;
     }
 
     //////////////////////////
     // External Functions
     //////////////////////////
+
+
+    function updateProtocolAddress(address _vaultAddress) external {
+        if(alreadyUpdated) revert Protocol__AlreadyUpdated();
+        if(msg.sender != i_ADMIN) revert Protocol__OnlyAdminCanUpdate();
+
+        vaultAddress = _vaultAddress;
+        alreadyUpdated = true;
+
+    }
 
     // Prior using this function provide allowance to this contract. 
     function depositCollateral(uint256 amount) external moreThanZero(amount) nonReentrant {
@@ -139,7 +160,7 @@ error Protocol__OpenPositionFirst();
         } 
     }
 
-    function openingPosition(uint256 _size, bool _isLong) moreThanZero(_size) external {
+    function openPosition(uint256 _size, bool _isLong) moreThanZero(_size) external {
         // CEI
         bool eligible = checkLeverageFactor(msg.sender, _size);
         if (!eligible) revert Protocol__LeverageLimitReached();
@@ -173,8 +194,41 @@ error Protocol__OpenPositionFirst();
         s_numOfOpenPositions++;
     } 
 
+    function closePosition() external {
+    // CEI
+    Position memory userToClose = positions[msg.sender];
+    if(userToClose.isInitialized == false){
+        revert Protocol__OpenPositionFirst();
+    }
+    // Profit calculate differently
+        int256 borrowedAmount = toInt256(userToClose.size);
+        int256 currValueOfToken = toInt256(_getPriceOfBtc() * userToClose.sizeOfToken);
+        int256 PnL;
+    if(userToClose.isLong) {
+        PnL = _checkPnLForLong(borrowedAmount, currValueOfToken);
+    } else {
+        PnL = _checkPnLForShort(borrowedAmount, currValueOfToken);
+    }
+
+    delete positions[msg.sender]; //confirm the position
+    emit PositionClose(msg.sender, userToClose.size);
+    if (PnL > 0){
+    
+        uint256 profit = PnL.abs(); // convert int to uint256
+        s_collateralOfUser[msg.sender] += profit;
+        IERC20(i_acceptedCollateral).transferFrom(vaultAddress, address(this), profit);
+
+    } else { // assuming if PnL ==0 no changes required just delete /*else if (PnL == 0) {}*/
+
+        uint256 loss = PnL.abs();
+       bool success = _liquidateUser(msg.sender, loss);
+        if(!success) revert Protocol__RedeemFailed();
+        }
+    
+    }
+
     //  if user have open position, User can not withdrawal?
-    function redeemCollateral(uint256 _amount) external moreThanZero (_amount) nonReentrant {
+    function withdrawCollateral(uint256 _amount) external moreThanZero (_amount) nonReentrant {
         Position memory UserPosition = positions[msg.sender];
         if(UserPosition.isInitialized){
             if(UserPosition.size != 0){
@@ -191,17 +245,51 @@ error Protocol__OpenPositionFirst();
 
     }
 
+  
 
 
     //////////////////////////
     // Internals Functions
     //////////////////////////
 
+    /**@dev Liquidate User */
+    function _liquidateUser(address user, uint256 lossToCover) internal returns(bool){
+         uint256 userBal = s_collateralOfUser[user];
+         uint256 amountToCover;
+        //  uint256 amountToCover = userBal >= loss ? loss : s_collateralOfUser[user];
+         if(userBal >= lossToCover){
+            amountToCover = lossToCover;
+         } else {
+            amountToCover = s_collateralOfUser[user];
+         }
+            s_collateralOfUser[user] -= amountToCover;
+            bool success = _redeemCollateral(address(vaultAddress), amountToCover);
+            return success;
+    }
+
     // Check Profit or loss of user
-        // function checkPnL
+        function _checkPnLForLong(int256 size, int256 value) internal pure returns(int256) {
+            int256 PnL = value - size;
+            return PnL;
+
+        }
+         function _checkPnLForShort(int256 size, int256 value) internal pure returns(int256) {
+            int256 PnL = size - value;
+            return PnL;
+
+        }
 
     // function transfer(address to, uint256 amount) external returns (bool);
 
+    // function convertToUint(int256 _num) public pure returns (uint256) {
+    //     return _num.abs();
+    // }
+
+    // To convert the value of uint256 to int256 safely
+    function toInt256(uint256 value) internal pure returns (int256) {
+        require(value <= uint256(type(int256).max), "Value exceeds int256 max");
+        return int256(value);
+    }
 
     // Redeem
     function _redeemCollateral(address receiver, uint256 amount) internal returns (bool success) {
