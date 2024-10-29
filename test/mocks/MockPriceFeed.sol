@@ -6,7 +6,8 @@ import { MockV3Aggregator } from "@chainlink/contracts/src/v0.8/tests/MockV3Aggr
 
 contract MockPriceFeed is MockV3Aggregator {
     
-    constructor() MockV3Aggregator(8, 6893539421739) {    
+    // constructor() MockV3Aggregator(8, 6893539421739) {    
+    constructor() MockV3Aggregator(8,    6000000000000) {    
     }
 }
 

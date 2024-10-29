@@ -6,6 +6,8 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Protocol2} from "src/Protocol2.sol";
+import {console} from "forge-std/console.sol";
+
 
 
 contract Vault is ERC4626 {
@@ -44,6 +46,7 @@ contract Vault is ERC4626 {
         }
 
         uint256 amountToHold = protocol.liquidityReservesToHold();
+        console.log("amountToHold",amountToHold);
         uint256 totalSupplyOfToken = totalSupply();
         if((totalSupplyOfToken - assets) < amountToHold){
             revert Vault__WithdrawLimitAffectingReserveThreshold();

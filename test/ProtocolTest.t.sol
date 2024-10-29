@@ -21,6 +21,10 @@ Vault vault;
 MockPriceFeed feed;
 address user = makeAddr("user");
 address user2 = makeAddr("user2");
+address user3 = makeAddr("user3");
+address user4 = makeAddr("user4");
+address user5 = makeAddr("user5");
+
     function setUp() public {
         vm.startBroadcast(msg.sender);
         feed = new MockPriceFeed();
@@ -37,19 +41,116 @@ address user2 = makeAddr("user2");
         assert (vaultAddr == address(vault));
     }
 
+    function testForLiquidityResreves() public {
+        vm.startPrank(user);
+        token.mint();
+        token.approve(address(vault), token.balanceOf(user));
+        vault.deposit(100 ether, user);
+        vm.stopPrank();
+
+        
+        vm.startPrank(user2);
+        token.mint();
+        token.approve(address(vault), token.balanceOf(user2));
+        vault.deposit(100 ether, user2);
+        assert(vault.balanceOf(user) == vault.balanceOf(user2));
+        vm.stopPrank();
+
+
+        vm.startPrank(user3);
+        token.mint();
+        token.approve(address(vault), token.balanceOf(user3));
+        vault.deposit(100 ether, user3);
+        assert(vault.balanceOf(user3) == vault.balanceOf(user2));
+        assert(token.balanceOf(address(vault)) == 300 ether);
+        vm.stopPrank();
+
+
+        vm.startPrank(user4);
+        token.mint();
+        token.approve(address(vault), token.balanceOf(user4));
+        vault.deposit(100 ether, user4);
+        assert(vault.balanceOf(user3) == vault.balanceOf(user4));
+        assert(token.balanceOf(address(vault)) == 400 ether);
+        vm.stopPrank();
+    }
+
+    function testDepositWhileLPExistShort() public {
+        testForLiquidityResreves();
+        vm.startPrank(msg.sender);
+        token.mint();
+        token.approve(address(protocol), 100 ether);
+        protocol.depositCollateral(100 ether);
+        protocol.openPosition(1500 ether, false);
+
+        // Closing Positions -----------------------------------
+        int256 updateAnswer = 64000e8; 
+        feed.updateAnswer(updateAnswer);
+        int256 PnL = protocol.checkProfitOrLossForUser(msg.sender);
+        console.log("PROFIT", PnL);
+        token.balanceOf(address(vault));
+        protocol.closePosition();
+        assert(token.balanceOf(address(vault)) == 500 ether);
+        vm.stopPrank();
+    }
+
+    function testToCheckLPsWithdraw() public {
+        testForLiquidityResreves();
+        
+        vm.startPrank(user5);
+        token.mint();
+        token.approve(address(protocol), 100 ether);
+        protocol.depositCollateral(100 ether);
+        protocol.openPosition(1000 ether, true);
+        vm.stopPrank();
+
+
+        vm.startPrank(msg.sender);
+        token.mint();
+        token.approve(address(protocol), 100 ether);
+        protocol.depositCollateral(100 ether);
+        protocol.openPosition(1500 ether, false);
+
+        // Price update
+        int256 updateAnswer = 5400000000000; 
+        // int256 updateAnswer = 64000e8; 
+         feed.updateAnswer(updateAnswer);
+        vm.stopPrank();
+
+        vm.startPrank(user);
+        console.log("vaultBal",token.balanceOf(address(vault)));
+        vault.withdraw(100 ether, user, user);
+        vm.stopPrank();
+
+
+     vm.startPrank(user2);
+        console.log("vaultBal",token.balanceOf(address(vault)));
+        vault.withdraw(100 ether, user2, user2);
+        vm.stopPrank();
+
+         vm.startPrank(user3);
+        console.log("vaultBal",token.balanceOf(address(vault)));
+        vault.withdraw(100 ether, user3, user3);
+        vm.stopPrank();
+
+
+        
+
+
+    }
+
     function testDepositCollateralAndOpenPosition() public {
         vm.startPrank(msg.sender);
         token.mint();
         token.approve(address(protocol), 100 ether);
         protocol.depositCollateral(100 ether);
         assert(protocol.getCollateralBalance(msg.sender) == 100 ether);
-        // protocol.withdrawCollateral(100 ether);
 
         // Opening Positions ------------------------------------
         protocol.openPosition(1500 ether, true);
         assert(protocol.getNumOfOpenPositions() == 1);
 
-        (uint256 size, uint256 sizeOfToken, bool isLong) = protocol.getPositionDetails(msg.sender);
+        (uint256 size, uint256 sizeOfToken, bool isLong,) = protocol.getPositionDetails(msg.sender);
         console.log("size:", size);
         console.log("sizeOfToken:", sizeOfToken);
         if(isLong) console.log("isLong: TRUE");
@@ -59,7 +160,17 @@ address user2 = makeAddr("user2");
         console.log(totalSizeOfToken, "totalSizeOfToken");
 
         // Closing Positions -----------------------------------
+        int256 updateAnswer = 58000e8; 
+        feed.updateAnswer(updateAnswer);
+        int256 PnL = protocol.checkProfitOrLossForUser(msg.sender);
+
         protocol.closePosition();
+        (uint256 t1, uint256 t2) = protocol.getTotalLongPositions();   
+                console.log(t1,"totalSize");
+        console.log(t2, "totalSizeOfToken");
+        uint256 userBal = protocol.getCollateralBalance(msg.sender);
+        assert (userBal == 50 ether);
+        // protocol.withdrawCollateral(100 ether);
         vm.stopPrank();
         }
 

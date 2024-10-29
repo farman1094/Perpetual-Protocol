@@ -277,20 +277,27 @@ using SignedMath for int256;
         uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
         if(totalReserve == 0) revert Protocol__CurrentlyNumberIsZero();
         // uint256 totalPositionsSize = longPosition.totalSize + shortPosition.totalSize;
-        int256 PnLForLong = _checkPnLForLong(toInt256(longPosition.totalSize), toInt256(longPosition.totalSizeOfToken));
-        int256 PnLForShort = _checkPnLForShort(toInt256(shortPosition.totalSize), toInt256(shortPosition.totalSizeOfToken));
-        int256 totalPnL = PnLForLong + PnLForShort;
+        // int256 actualTotalSizeOfTokenLong = _getActualValueOfToken(longPosition.totalSizeOfToken); // toInt256( * _getPriceOfBtc());
+        int256 PnLForLongForUser = _checkPnLForLong(toInt256(longPosition.totalSize), toInt256(longPosition.totalSizeOfToken));
+        
+
+        // int256 actualTotalSizeOfTokenShort = _getActualValueOfToken; // toInt256( * _getPriceOfBtc());
+        // int256 actualTotalSizeOfTokenShort = toInt256( * _getPriceOfBtc());
+        int256 PnLForShortUser = _checkPnLForShort(toInt256(shortPosition.totalSize), toInt256(shortPosition.totalSizeOfToken));
+        
+        int256 totalPnLForUser = PnLForLongForUser + PnLForShortUser;
+        console.log("totalPnLForUser", totalPnLForUser);
+        
         uint256 amountToKeep = _getAmountToHoldInPool();
-        if(totalPnL > 0){
-            uint256 profit = totalPnL.abs();
-            amountToHold = amountToKeep - profit;
-        } else if(totalPnL == 0) {
+        if(totalPnLForUser > 0){
+            uint256 lossToLPs = totalPnLForUser.abs();
+            amountToHold = amountToKeep + lossToLPs;
+        } else if(totalPnLForUser == 0) {
             amountToHold = amountToKeep;
         } else {
-            uint256 loss = totalPnL.abs();
-            amountToHold = amountToKeep + loss;
+            uint256 profitToLps = totalPnLForUser.abs();
+            amountToHold = amountToKeep - profitToLps;
         }
-
         return amountToHold;
         }
 
@@ -309,15 +316,16 @@ using SignedMath for int256;
         Position memory userCheck = positions[user];
         
         int256 borrowedAmount = toInt256(userCheck.size);
-        int256 currValueOfToken = toInt256((_getPriceOfBtc() * userCheck.sizeOfToken)/1e18);
-        console.log(currValueOfToken);
+        // int256 currValueOfToken = toInt256((_getPriceOfBtc() * userCheck.sizeOfToken)/1e18);
+        int256 token = toInt256(userCheck.sizeOfToken);
+
         int256 PnL;
 
         // Profit calculate differently
         if(userCheck.isLong) {
-            PnL = _checkPnLForLong(borrowedAmount, currValueOfToken);
+            PnL = _checkPnLForLong(borrowedAmount, token);
         } else {
-            PnL = _checkPnLForShort(borrowedAmount, currValueOfToken);
+            PnL = _checkPnLForShort(borrowedAmount, token);
         }
         return PnL;
     }
@@ -339,7 +347,11 @@ using SignedMath for int256;
             shortPosition.totalSizeOfToken += _numOfToken;
         }
 
-        
+        /**@dev uses INT */
+        function _getActualValueOfToken(int256 _sizeOfToken) internal view returns(int256 actuaTokenValue){
+         actuaTokenValue  = toInt256(( _getPriceOfBtc() * _sizeOfToken.abs()) / 1e18);
+         return actuaTokenValue;
+        }
 
     /**@dev Liquidate User */
     function _liquidateUser(address user, uint256 lossToCover) internal returns(bool){
@@ -357,13 +369,17 @@ using SignedMath for int256;
     }
 
     // Check Profit or loss of user
-        function _checkPnLForLong(int256 size, int256 value) internal pure returns(int256) {
-            int256 PnL = value - size;
+        function _checkPnLForLong(int256 size, int256 token) internal view returns(int256) {
+            int256 actualValue =  _getActualValueOfToken(token); // toInt256( * _getPriceOfBtc());
+            int256 PnL = actualValue - size;
             return PnL;
 
         }
-         function _checkPnLForShort(int256 size, int256 value) internal pure returns(int256) {
-            int256 PnL = size - value;
+         function _checkPnLForShort(int256 size, int256 token) internal view returns(int256) {
+            int256 actualValue =  _getActualValueOfToken(token); // toInt256( * _getPriceOfBtc());
+
+            int256 PnL = size - actualValue;
+    
             return PnL;
 
         }
@@ -432,6 +448,18 @@ using SignedMath for int256;
     // Getters and View function
     //////////////////////////
 
+    function checkProfitOrLossForUser(address _user) public view returns(int256 PnL) {
+        Position memory userToClose = positions[_user];
+    if(userToClose.isInitialized == false){
+        revert Protocol__OpenPositionFirst();
+    }
+
+  
+     PnL = _checkProfitOrLossForUser(_user);
+     return PnL;
+
+    }
+
     function getTotalLongPositions() public view returns(uint256 totalSize, uint256 totalSizeOfToken) {
         totalSize = longPosition.totalSize;
         totalSizeOfToken = longPosition.totalSizeOfToken;
@@ -439,11 +467,12 @@ using SignedMath for int256;
     }
 
 
-    function getPositionDetails(address user) public view returns (uint256 size, uint256 sizeOfToken, bool isLong) {
+    function getPositionDetails(address user) public view returns (uint256 size, uint256 sizeOfToken, bool isLong, bool isInitialized) {
         size = positions[user].size;
         sizeOfToken = positions[user].sizeOfToken;
         isLong = positions[user].isLong;
-        return (size, sizeOfToken, isLong);
+        isInitialized = positions[user].isInitialized;
+        return (size, sizeOfToken, isLong, isInitialized);
     }
     
 
