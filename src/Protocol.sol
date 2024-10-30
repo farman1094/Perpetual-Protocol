@@ -31,6 +31,7 @@ contract Protocol is ReentrancyGuard {
     error Protocol__AlreadyUpdated();
     error Protocol__OnlyAdminCanUpdate();
     error Protocol__TokenValueIsMoreThanSize();
+    error Protocol__CollateralReserveIsNotAvailable();
     error Protocol__CannotIncreaseSizeInLoss__FirstSettleTheExistDues();
 
     using SignedMath for int256;
@@ -144,6 +145,10 @@ contract Protocol is ReentrancyGuard {
      * @param _isLong (send true for long, false for short)
      */
     function openPosition(uint256 _size, uint256 _sizeOfToken, bool _isLong) external moreThanZero(_size) {
+        
+        uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
+        if (totalReserve == 0) revert Protocol__CollateralReserveIsNotAvailable();
+
         bool eligible = checkLeverageFactor(msg.sender, _size);
         if (!eligible) revert Protocol__LeverageLimitReached();
         uint256 numOfToken;

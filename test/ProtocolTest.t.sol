@@ -174,6 +174,7 @@ contract ProtocolTest is Test {
     }
 
     function testDepositCollateralAndOpenPosition() public {
+        testForLiquidityResreves();
         vm.startPrank(msg.sender);
         token.mint();
         token.approve(address(protocol), 100 ether);
