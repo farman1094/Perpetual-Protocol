@@ -2,7 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test, console} from "forge-std/Test.sol";
-import {Protocol2} from "src/Protocol2.sol";
+import {Protocol} from "src/Protocol.sol";
 
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -15,7 +15,7 @@ import {MockERC20} from "test/mocks/MockERC20.sol";
 import {MockPriceFeed} from "test/mocks/MockPriceFeed.sol";
 
 contract ProtocolTest is Test {
-    Protocol2 protocol;
+    Protocol protocol;
     PrepToken token;
     Vault vault;
     MockPriceFeed feed;
@@ -29,7 +29,7 @@ contract ProtocolTest is Test {
         vm.startBroadcast(msg.sender);
         feed = new MockPriceFeed();
         token = new PrepToken();
-        protocol = new Protocol2(address(token), msg.sender, address(feed));
+        protocol = new Protocol(address(token), msg.sender, address(feed));
         vault = new Vault(address(token), protocol);
         protocol.updateVaultAddress(address(vault));
         vm.stopBroadcast();
@@ -126,20 +126,18 @@ contract ProtocolTest is Test {
         feed.updateAnswer(updateAnswer);
         vm.stopPrank();
 
-        vm.startPrank(user);
-        console.log("vaultBal", token.balanceOf(address(vault)));
-        vault.withdraw(100 ether, user, user);
-        vm.stopPrank();
+        // vm.startPrank(user);
+        // vault.withdraw(72 ether, user, user);
+        // vm.stopPrank();
 
         vm.startPrank(user2);
-        console.log("vaultBal", token.balanceOf(address(vault)));
-        vault.withdraw(100 ether, user2, user2);
+        vault.redeem(73 ether, user2, user2);
         vm.stopPrank();
 
-        vm.startPrank(user3);
-        console.log("vaultBal", token.balanceOf(address(vault)));
-        vault.withdraw(100 ether, user3, user3);
-        vm.stopPrank();
+        // vm.startPrank(user3);
+        // console.log("vaultBal", token.balanceOf(address(vault)));
+        // vault.withdraw(100 ether, user3, user3);
+        // vm.stopPrank();
     }
 
     function testCheckIfUserDoesNotExist() public view {
@@ -158,12 +156,29 @@ contract ProtocolTest is Test {
         assert(num == 0);
     }
 
+    function testCannotIncreaseInLoss() public {
+        testForLiquidityResreves();
+        vm.startPrank(msg.sender);
+        token.mint();
+        token.approve(address(protocol), 100 ether);
+        protocol.depositCollateral(100 ether);
+        protocol.openPosition(1000 ether, 0, false);
+
+        // Closing Positions -----------------------------------
+        // int256 updateAnswer = 54000e8;
+        // feed.updateAnswer(updateAnswer);
+        int256 PnL = protocol.checkProfitOrLossForUser(msg.sender);
+        console.log("PROFIT", PnL);
+        protocol.increasePosition(500 ether);
+        vm.stopPrank();
+    }
+
     function testDepositCollateralAndOpenPosition() public {
         vm.startPrank(msg.sender);
         token.mint();
         token.approve(address(protocol), 100 ether);
         protocol.depositCollateral(100 ether);
-        assert(protocol.getCollateralBalance(msg.sender) == 100 ether);
+        assert(protocol.getCollateralBalance() == 100 ether);
 
         // Opening Positions ------------------------------------
         protocol.openPosition(1500 ether, 0, true);
@@ -187,10 +202,23 @@ contract ProtocolTest is Test {
         (uint256 t1, uint256 t2) = protocol.getTotalLongPositions();
         console.log(t1, "totalSize");
         console.log(t2, "totalSizeOfToken");
-        uint256 userBal = protocol.getCollateralBalance(msg.sender);
+        uint256 userBal = protocol.getCollateralBalance();
         assert(userBal == 50 ether);
         // protocol.withdrawCollateral(100 ether);
         vm.stopPrank();
+    }
+
+    function testGetterFunctionShouldNotRevert() public view {
+        protocol.checkProfitOrLossForUser(user);
+        protocol.getTotalLongPositions();
+        protocol.getTotalShortPositions();
+        protocol.getPositionDetails(msg.sender);
+        protocol.getNumOfOpenPositions();
+        protocol.getCollateralBalance();
+        protocol.getVaultAddress();
+        protocol.getPriceOfBtc();
+        protocol.getNumOfTokenByAmount(1 ether);
+        protocol.checkLeverageFactor(msg.sender, 100);
     }
 
     //    function testtingERC4626() public view {

@@ -4,7 +4,8 @@ pragma solidity ^0.8.24;
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import {Protocol2} from "src/Protocol2.sol";
+import {Protocol} from "src/Protocol.sol";
+import {console} from "forge-std/console.sol";
 
 /**
  * @title Vault
@@ -18,31 +19,31 @@ import {Protocol2} from "src/Protocol2.sol";
 contract Vault is ERC4626 {
     error Vault__WithdrawLimitAffectingReserveThreshold();
 
-    Protocol2 private protocol;
+    Protocol private protocol;
 
-    constructor(address assetAddr, Protocol2 _protocol) ERC20("LP's Token", "LPT") ERC4626(IERC20(assetAddr)) {
+    constructor(address assetAddr, Protocol _protocol) ERC20("LP's Token", "LPT") ERC4626(IERC20(assetAddr)) {
         protocol = _protocol;
         // Allowance so the protocol can withdraw money
         IERC20(assetAddr).approve(address(protocol), type(uint256).max);
     }
 
-    // Need to update the LP's cannot withdraw when the position is opened
-
+    // Once Liquidity providers deposited the money they need to keep 15% of their reserves.
+    // It also goes up's and down accroding to the situation of profit and loss
     function withdraw(uint256 assets, address receiver, address owner) public override returns (uint256) {
         uint256 maxAssets = maxWithdraw(owner);
         if (assets > maxAssets) {
             revert ERC4626ExceededMaxWithdraw(owner, assets, maxAssets);
         }
 
-        uint256 amountToHold = protocol.liquidityReservesToHold();
-        uint256 totalSupplyOfToken = totalSupply();
-        if ((totalSupplyOfToken - assets) < amountToHold) {
+        // changes here
+        (uint256 amountToHoldForUser, uint256 balanceOfUser) = _getAmountToHoldforUser(owner);
+        if ((balanceOfUser - assets) < amountToHoldForUser) {
             revert Vault__WithdrawLimitAffectingReserveThreshold();
         }
 
         uint256 shares = previewWithdraw(assets);
+        console.log(shares);
         _withdraw(_msgSender(), receiver, owner, assets, shares);
-
         return shares;
     }
 
@@ -54,16 +55,30 @@ contract Vault is ERC4626 {
         if (shares > maxShares) {
             revert ERC4626ExceededMaxRedeem(owner, shares, maxShares);
         }
-
         uint256 assets = previewRedeem(shares);
-        uint256 amountToHold = protocol.liquidityReservesToHold();
-        uint256 totalSupplyOfToken = totalSupply();
-        if ((totalSupplyOfToken - assets) < amountToHold) {
+
+        (uint256 amountToHoldForUser, uint256 balanceOfUser) = _getAmountToHoldforUser(owner);
+        console.log("redeem", amountToHoldForUser);
+        if ((balanceOfUser - assets) < amountToHoldForUser) {
             revert Vault__WithdrawLimitAffectingReserveThreshold();
         }
 
         _withdraw(_msgSender(), receiver, owner, assets, shares);
-
         return assets;
+    }
+
+    // Function to get the the amount user have to hold. It depend on the percent we have to hold for all pool.
+    function _getAmountToHoldforUser(address _owner)
+        internal
+        view
+        returns (uint256 amountToHoldForUser, uint256 balanceOfUser)
+    {
+        uint256 amountToHold = protocol.liquidityReservesToHold();
+        uint256 totalSupplyOfToken = totalAssets();
+        uint256 percentToHold = ((amountToHold * 100) / totalSupplyOfToken);
+        balanceOfUser = balanceOf(_owner);
+        amountToHoldForUser = (balanceOfUser / 100) * percentToHold;
+
+        return (amountToHoldForUser, balanceOfUser);
     }
 }
