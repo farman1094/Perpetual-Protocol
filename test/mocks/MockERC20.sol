@@ -8,7 +8,5 @@ contract MockERC20 is ERC20 {
         _mint(msg.sender, 12e18);
     }
 
-
     /// Need to update withdraw and redemmed function to make sure Liquidity providers cannot withdraw when the positions is open or reserved
-    
 }
