@@ -75,7 +75,6 @@ contract ProtocolTest is Test {
         testForLiquidityResreves();
         vm.startPrank(msg.sender);
         token.mint();
-        token.mint();
 
         token.approve(address(protocol), 100 ether);
         protocol.depositCollateral(100 ether);

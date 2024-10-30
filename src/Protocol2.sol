@@ -136,7 +136,7 @@ contract Protocol2 is ReentrancyGuard {
     }
 
     /**
-     * NOTE You can open position with collateral at 15% leverage rate 
+     * NOTE You can open position with collateral at 15% leverage rate
      * @param _size the borrowing amount or position, @param _sizeOfToken the number of token you want to trade
      * @param _isLong (send true for long, false for short)
      */
