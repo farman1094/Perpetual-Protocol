@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 // Layout of Contract:
 // version
@@ -25,6 +25,7 @@ pragma solidity ^0.8.24;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {SignedMath} from "@openzeppelin/contracts/utils/math/SignedMath.sol";
+
 import { AggregatorV3Interface } from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {Vault} from "src/Vault.sol";
 import {console} from "forge-std/console.sol";
@@ -34,6 +35,8 @@ import {console} from "forge-std/console.sol";
  * @title PrepProtocol
  * @author Mohd Farman
  * This system is designed to be as minimal as possible.
+ * NOTE This system accept PrepToken as a collateral for both Trader and Liquidy Provider.
+ * In this system you can open positions for Bitcoin
  */
 
 
@@ -53,6 +56,7 @@ error Protocol__CannotWithdrawWithOpenPosition();
 error Protocol__OpenPositionFirst();
 error Protocol__AlreadyUpdated();
 error Protocol__OnlyAdminCanUpdate();
+error Protocol__TokenValueIsMoreThanSize();
 
 
 
@@ -84,7 +88,6 @@ using SignedMath for int256;
     // State variables 
     //////////////////////////
 
-    // address constant BTC = 0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43; // Price Feed adress for BTC/USD
     uint256 constant LEVERAGE_RATE = 15; // Leverage rate if 10$ can open the position for $150
     uint256 constant LIQUIDITY_THRESHOLD = 15; // if total supply is 100, lp's have to keep 15% in the pool any loses (15+lose) (15 - profit)
 
@@ -103,6 +106,7 @@ using SignedMath for int256;
     mapping(address => Position) positions;  
     mapping(address => uint256)  s_collateralOfUser;
     uint256 private s_numOfOpenPositions;
+    // address constant token = 0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43; // Price Feed adress for token/USD
 
     LongPosition public longPosition; 
     ShortPosition public shortPosition;
@@ -128,7 +132,6 @@ using SignedMath for int256;
 
 
     constructor(address collateralAddress, address _i_ADMIN, address btc) {
-
         i_acceptedCollateral = collateralAddress;
         i_ADMIN = _i_ADMIN;
         i_BTC = btc;
@@ -148,15 +151,17 @@ using SignedMath for int256;
     }
 
 
-    // Prior using this function provide allowance to this contract. 
+    
+     
+     //NOTE Prior using this function provide allowance to this contract of PrepToken.
     function depositCollateral(uint256 amount) external moreThanZero(amount) nonReentrant {
-        // CEI
        s_collateralOfUser[msg.sender] += amount; 
         emit CollateralDeposited(msg.sender, amount);
         bool success = IERC20(i_acceptedCollateral).transferFrom(msg.sender, address(this), amount);
         if (!success) revert Protocol__DepositFailed();
     }
 
+    // Note only Open position size can be increased
     function increasePosition(uint256 _size) moreThanZero (_size)  external {
             Position memory UserPosition = positions[msg.sender];
             if(UserPosition.isInitialized == false){
@@ -175,14 +180,28 @@ using SignedMath for int256;
             } 
     }
 
-    function openPosition(uint256 _size, bool _isLong) moreThanZero(_size) external {
+    /** NOTE You can open position with collateral at 15% leverage rate 
+     * @param _size the borrowing amount or position, @param _sizeOfToken the number of token you want to trade
+     * @param _isLong (send true for long, false for short)
+     */
 
-        // CEI
+    function openPosition(uint256 _size, uint256 _sizeOfToken, bool _isLong) moreThanZero(_size) external {
+
         bool eligible = checkLeverageFactor(msg.sender, _size);
         if (!eligible) revert Protocol__LeverageLimitReached();
+        uint256 numOfToken;
+
+        if(_sizeOfToken == 0) {
+
+        numOfToken = _getNumOfTokenByAmount(_size);
+        } else {
+            uint256 valueofToken = _sizeOfToken * _getPriceOfBtc();
+            if(_size < valueofToken) revert Protocol__TokenValueIsMoreThanSize();
+            numOfToken = _sizeOfToken;
+        }
 
 
-        uint256 numOfToken = _getNumOfTokenByAmount(_size);
+
         if(_isLong) { // position for long
         positions[msg.sender] = Position({
             size: _size,
@@ -212,18 +231,17 @@ using SignedMath for int256;
         s_numOfOpenPositions++;
     } 
 
+
+    // Function to close the position and clear the dues, For both Profit and loss cases.
+    
     function closePosition() external {
-    // CEI
     Position memory userToClose = positions[msg.sender];
     if(userToClose.isInitialized == false){
         revert Protocol__OpenPositionFirst();
     }
 
   
-    int256 PnL = _checkProfitOrLossForUser(msg.sender);
-    console.log(PnL);
-  
-
+    int256 PnL = _checkProfitOrLossForUser(msg.sender);  
     // Update the total Accounting 
         if(userToClose.isLong) {
             longPosition.totalSize -= userToClose.size;
@@ -233,19 +251,18 @@ using SignedMath for int256;
             shortPosition.totalSizeOfToken -= userToClose.sizeOfToken;
         }
 
-    /**@dev reset the mapping */
+    // reset the mapping 
     delete positions[msg.sender]; //confirm the position
-
     s_numOfOpenPositions--;
     emit PositionClose(msg.sender, userToClose.size);
-    if (PnL > 0){
+
     
+     if (PnL > 0){
         uint256 profit = PnL.abs(); // convert int to uint256
         s_collateralOfUser[msg.sender] += profit;
         IERC20(i_acceptedCollateral).transferFrom(address(vault), address(this), profit);
 
-    } else if (PnL < 0){ // assuming if PnL ==0 no changes required just delete /*else if (PnL == 0) {}*/
-
+    } else if (PnL < 0){ 
         uint256 loss = PnL.abs();
         bool success = _liquidateUser(msg.sender, loss);
         if(!success) revert Protocol__RedeemFailed();
@@ -253,7 +270,9 @@ using SignedMath for int256;
     
     }
 
-    //  if user have open position, User can not withdrawal?
+    /** NOTE In order to withdraw money, there should not be any open position
+        If open position exist it needed to be close first
+         */
     function withdrawCollateral(uint256 _amount) external moreThanZero (_amount) nonReentrant {
         Position memory UserPosition = positions[msg.sender];
         if(UserPosition.isInitialized){
@@ -273,16 +292,18 @@ using SignedMath for int256;
 
     }
 
+        /**
+         * This function is for Vault to prevent liquidity providers to withdraw the collateral which is reserve for Traders
+         * It calculates according to total open positions if the all the protocol users is in loss or profit
+         * Note Reserve Rate is 15% of total collateral, Additional accounting also keep in mind for flexibility. 
+         * In the situation of Loss or Profit to Protocol. If Loss (amountToHold + 15%) In Profit (amountToHold - 15%)  
+         *  it returns @param amountToHold Which needed to hold in Vault for clear traders dues
+         */
         function liquidityReservesToHold() external view returns  (uint256 amountToHold){
         uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
         if(totalReserve == 0) revert Protocol__CurrentlyNumberIsZero();
-        // uint256 totalPositionsSize = longPosition.totalSize + shortPosition.totalSize;
-        // int256 actualTotalSizeOfTokenLong = _getActualValueOfToken(longPosition.totalSizeOfToken); // toInt256( * _getPriceOfBtc());
         int256 PnLForLongForUser = _checkPnLForLong(toInt256(longPosition.totalSize), toInt256(longPosition.totalSizeOfToken));
-        
-
-        // int256 actualTotalSizeOfTokenShort = _getActualValueOfToken; // toInt256( * _getPriceOfBtc());
-        // int256 actualTotalSizeOfTokenShort = toInt256( * _getPriceOfBtc());
+    
         int256 PnLForShortUser = _checkPnLForShort(toInt256(shortPosition.totalSize), toInt256(shortPosition.totalSizeOfToken));
         
         int256 totalPnLForUser = PnLForLongForUser + PnLForShortUser;
@@ -311,17 +332,17 @@ using SignedMath for int256;
     // Internals Functions
     //////////////////////////
 
-    // Function to check PnL
+    /**
+      * @dev Internal fucntion must not be called from outside. Getter function available to use these.
+      */
       function _checkProfitOrLossForUser(address user) internal view returns(int256){
         Position memory userCheck = positions[user];
         
         int256 borrowedAmount = toInt256(userCheck.size);
-        // int256 currValueOfToken = toInt256((_getPriceOfBtc() * userCheck.sizeOfToken)/1e18);
         int256 token = toInt256(userCheck.sizeOfToken);
 
         int256 PnL;
 
-        // Profit calculate differently
         if(userCheck.isLong) {
             PnL = _checkPnLForLong(borrowedAmount, token);
         } else {
@@ -331,13 +352,14 @@ using SignedMath for int256;
     }
 
 
+    // Return 15% of totalSupply of Reserves
     function _getAmountToHoldInPool() internal view returns(uint256 amountToKeep){
         uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
         amountToKeep = (totalReserve/100) * LIQUIDITY_THRESHOLD;
         return amountToKeep;
     }
 
-    // Increase  total positions
+    // These functions used for the accounting for total open positions
       function _increaseTotalLongPosition(uint256 _size, uint256 _numOfToken ) internal {
             longPosition.totalSize += _size;
             longPosition.totalSizeOfToken += _numOfToken;
@@ -347,14 +369,14 @@ using SignedMath for int256;
             shortPosition.totalSizeOfToken += _numOfToken;
         }
 
-        /**@dev uses INT */
+        // It return the Actutal value of token by number of token. (sizeOfToken * curentPrice)
         function _getActualValueOfToken(int256 _sizeOfToken) internal view returns(int256 actuaTokenValue){
          actuaTokenValue  = toInt256(( _getPriceOfBtc() * _sizeOfToken.abs()) / 1e18);
          return actuaTokenValue;
         }
 
-    /**@dev Liquidate User */
-    function _liquidateUser(address user, uint256 lossToCover) internal returns(bool){
+    /**@dev This function is called is used in situation of losses, When trader come to close position */
+        function _liquidateUser(address user, uint256 lossToCover) internal returns(bool){
          uint256 userBal = s_collateralOfUser[user];
          uint256 amountToCover;
         //  uint256 amountToCover = userBal >= loss ? loss : s_collateralOfUser[user];
@@ -368,7 +390,9 @@ using SignedMath for int256;
             return success;
     }
 
+
     // Check Profit or loss of user
+
         function _checkPnLForLong(int256 size, int256 token) internal view returns(int256) {
             int256 actualValue =  _getActualValueOfToken(token); // toInt256( * _getPriceOfBtc());
             int256 PnL = actualValue - size;
@@ -401,34 +425,33 @@ using SignedMath for int256;
     }
 
 
-    // to check leverage percentage is as per approved
-    /**@dev we are not checking if _size already exist */
-    function _checkLeverageFactorForNew(address sender, uint256 _size) internal view returns(bool) {
+    // to check leverage percentage for new users as per approved
+    function _checkLeverageFactorForNew(address sender, uint256 _size) internal view returns(bool ) {
         uint256 collateralOfUser = s_collateralOfUser[sender];
-        uint256 sizeLimit = collateralOfUser * LEVERAGE_RATE;
-        bool eligible;
-        if(sizeLimit >= _size){
-             eligible = true;
-        }else {
-            eligible = false;
+        if(collateralOfUser == 0){
+            return false;
         }
-        return eligible;
+        uint256 sizeLimit = collateralOfUser * LEVERAGE_RATE;
+        if(sizeLimit >= _size){
+             return true;
+        }else {
+            return false;
+        }
     }
 
-    function _checkLeverageFactorForExisting(address sender, uint256 _size) internal view returns(bool) { 
+
+
+    // to check leverage percentage for existing user is as per approved
+    function _checkLeverageFactorForExisting(address sender, uint256 _size) internal view returns(bool  ) { 
         Position memory UserPosition = positions[sender];
         uint256 collateralOfUser = s_collateralOfUser[sender];
         uint256 sizeLimit = collateralOfUser * LEVERAGE_RATE;
         uint256 sizeAskingFor = _size + UserPosition.size;
-        bool eligible;
          if(sizeLimit >= sizeAskingFor){
-             eligible = true;
+             return true;
         }else {
-            eligible = false;
+            return false;
         }
-        return eligible;
-
-
     }
 
     // According to size how much token get // (size should be in 1e18)
@@ -443,30 +466,38 @@ using SignedMath for int256;
      price = uint256(answer); // price return amount with e8 (correcting it)
     return price * PRICE_PRECISION;
     }
+    
 
     //////////////////////////
     // Getters and View function
     //////////////////////////
 
+    //  If users doesn't have open position it will return 0 
     function checkProfitOrLossForUser(address _user) public view returns(int256 PnL) {
         Position memory userToClose = positions[_user];
     if(userToClose.isInitialized == false){
-        revert Protocol__OpenPositionFirst();
-    }
-
-  
+        // revert Protocol__OpenPositionFirst(); // View function should not revert
+        PnL = 0;
+    } else {
      PnL = _checkProfitOrLossForUser(_user);
+    }
      return PnL;
-
     }
 
+    // Get total open positions accounting 
     function getTotalLongPositions() public view returns(uint256 totalSize, uint256 totalSizeOfToken) {
         totalSize = longPosition.totalSize;
         totalSizeOfToken = longPosition.totalSizeOfToken;
         return(totalSize, totalSizeOfToken);
     }
 
+        function getTotalShortPositions() public view returns(uint256 totalSize, uint256 totalSizeOfToken) {
+        totalSize = shortPosition.totalSize;
+        totalSizeOfToken = shortPosition.totalSizeOfToken;
+        return(totalSize, totalSizeOfToken);
+    }
 
+    // If user does not exist it will return ( 0, 0, false, false)
     function getPositionDetails(address user) public view returns (uint256 size, uint256 sizeOfToken, bool isLong, bool isInitialized) {
         size = positions[user].size;
         sizeOfToken = positions[user].sizeOfToken;
@@ -476,30 +507,41 @@ using SignedMath for int256;
     }
     
 
+    // Get number of Open Positions
     function getNumOfOpenPositions() public view returns(uint256){
         return s_numOfOpenPositions;
     }
 
+
+    // Get Collateral balance of user
     function getCollateralBalance(address _user) public view returns(uint256){
         return s_collateralOfUser[_user];
     }
+
+    // Get vault address 
     function getVaultAddress() public view returns(address){
         return address(vault);
     }
 
+    // Get price of BTC real Time
     function getPriceOfBtc() public view returns(uint256 price) {
         return _getPriceOfBtc();
     }
+
+    // Get num of token you get in provided amount
     function getNumOfTokenByAmount(uint256 amount) public view returns (uint256) {
          return _getNumOfTokenByAmount(amount);
 
     } 
+
+    // Check your size limit if it can be approved (If already deposited)
     function checkLeverageFactor(address sender, uint256 _size) public view returns(bool) {
+
         if(positions[sender].isInitialized){
-        return _checkLeverageFactorForNew(sender,_size);
+            return _checkLeverageFactorForExisting(sender,_size);
 
         } else {
-            return _checkLeverageFactorForExisting(sender,_size);
+        return _checkLeverageFactorForNew(sender,_size);
         }
     }
 

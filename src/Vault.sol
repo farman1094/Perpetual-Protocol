@@ -1,13 +1,20 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
-import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Protocol2} from "src/Protocol2.sol";
-import {console} from "forge-std/console.sol";
 
+/**
+ * @title Vault 
+ * @author Mohd Farman
+ * This system is designed to be as minimal as possible.
+ * NOTE This system accept PrepToken as a collateral 
+ * It woks as an pool for Protocol
+ * In this system the Liquidity Providers deposit money
+ * In exchange of collateral LP get shares
+ */
 
 
 contract Vault is ERC4626 {
@@ -18,22 +25,13 @@ contract Vault is ERC4626 {
 
     Protocol2 private protocol;
 
-    constructor(address assetAddr, Protocol2 _protocol) ERC20 ("LP's Token", "LPT")ERC4626 (IERC20(assetAddr)) {
-        // Allowance so the protocol can withdraw money
+    constructor(address assetAddr, Protocol2 _protocol) ERC20 ("LP's Token", "LPT") ERC4626 (IERC20(assetAddr)) {
         protocol = _protocol;
+        // Allowance so the protocol can withdraw money
         IERC20(assetAddr).approve(address(protocol), type(uint256).max);
      
     }
 
-
-    //     function updateProtocolAddress(address _protocolAddress) external {
-    //     if(alreadyUpdated) revert Vault__AlreadyUpdated();
-    //     if(msg.sender != i_ADMIN) revert Vault__OnlyAdminCanUpdate();
-
-    //     protocolAddress = _protocolAddress;
-    //     alreadyUpdated = true;
-
-    // }
     
 
 
@@ -46,7 +44,6 @@ contract Vault is ERC4626 {
         }
 
         uint256 amountToHold = protocol.liquidityReservesToHold();
-        console.log("amountToHold",amountToHold);
         uint256 totalSupplyOfToken = totalSupply();
         if((totalSupplyOfToken - assets) < amountToHold){
             revert Vault__WithdrawLimitAffectingReserveThreshold();
