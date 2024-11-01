@@ -60,7 +60,7 @@ contract Protocol is ReentrancyGuard {
 
     uint256 constant LEVERAGE_RATE = 15; // Leverage rate if 10$ can open the position for $150
     uint256 constant LIQUIDITY_THRESHOLD = 15; // if total supply is 100, lp's have to keep 15% in the pool any loses (15+lose) (15 - profit)
-
+    uint256 constant HELPER_TO_CALCULATE_PERCENTAGE = 100; // To get Percentage Helper
     uint256 constant PRICE_PRECISION = 1e10;
     uint256 constant PRECISION = 1e18;
 
@@ -293,7 +293,7 @@ contract Protocol is ReentrancyGuard {
     // Return 15% of totalSupply of Reserves
     function _getAmountToHoldInPool() internal view returns (uint256 amountToKeep) {
         uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
-        amountToKeep = (totalReserve / 100) * LIQUIDITY_THRESHOLD;
+        amountToKeep = (totalReserve / HELPER_TO_CALCULATE_PERCENTAGE) * LIQUIDITY_THRESHOLD;
         return amountToKeep;
     }
 

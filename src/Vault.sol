@@ -21,6 +21,8 @@ contract Vault is ERC4626 {
 
     Protocol private protocol;
 
+    uint256 constant HELPER_TO_CALCULATE_PERCENTAGE = 100; // To get Percentage Helper
+
     constructor(address assetAddr, Protocol _protocol) ERC20("LP's Token", "LPT") ERC4626(IERC20(assetAddr)) {
         protocol = _protocol;
         // Allowance so the protocol can withdraw money
@@ -79,8 +81,8 @@ contract Vault is ERC4626 {
             amountToHoldForUser = 0;
         } else {
             uint256 totalSupplyOfToken = totalAssets();
-            uint256 percentToHold = ((amountToHold * 100) / totalSupplyOfToken);
-            amountToHoldForUser = (balanceOfUser / 100) * percentToHold;
+            uint256 percentToHold = ((amountToHold * HELPER_TO_CALCULATE_PERCENTAGE) / totalSupplyOfToken);
+            amountToHoldForUser = (balanceOfUser / HELPER_TO_CALCULATE_PERCENTAGE) * percentToHold;
         }
         balanceOfUser = balanceOf(_owner);
 
