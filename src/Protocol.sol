@@ -257,13 +257,12 @@ contract Protocol is ReentrancyGuard {
             amountToHold = amountToKeep;
         } else {
             uint256 profitToLps = totalPnLForUser.abs();
-            if (profitToLps > amountToKeep) {   //If profit is more than hold amount
+            if (profitToLps > amountToKeep) {
+                //If profit is more than hold amount
                 amountToHold = 0;
-             } else {
-
-            amountToHold = amountToKeep - profitToLps;
-             }
-
+            } else {
+                amountToHold = amountToKeep - profitToLps;
+            }
         }
         return amountToHold;
     }
