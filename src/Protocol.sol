@@ -6,6 +6,8 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {SignedMath} from "@openzeppelin/contracts/utils/math/SignedMath.sol";
 
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {OracleLib} from "./libraries/OracleLib.sol";
+
 import {Vault} from "src/Vault.sol";
 
 /**
@@ -34,6 +36,7 @@ contract Protocol is ReentrancyGuard {
     error Protocol__CannotIncreaseSizeInLoss__FirstSettleTheExistDues();
 
     using SignedMath for int256;
+    using OracleLib for AggregatorV3Interface;
 
     struct Position {
         uint256 size; // BorrowedMoney
@@ -395,9 +398,10 @@ contract Protocol is ReentrancyGuard {
     }
 
     function _getPriceOfBtc() internal view returns (uint256 price) {
-        (, int256 answer,,,) = AggregatorV3Interface(i_BTC).latestRoundData();
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(i_BTC);
+        (, int256 answer,,,) = priceFeed.staleCheckLatestRoundData(); // Lib use
         price = uint256(answer); // price return amount with e8 (correcting it)
-        return price * PRICE_PRECISION;
+        return price * PRICE_PRECISION; //Making it (Price)e18
     }
 
     //////////////////////////

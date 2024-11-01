@@ -16,7 +16,7 @@ import {MockPriceFeed} from "test/mocks/MockPriceFeed.sol";
 
 contract ProtocolTest is Test {
     Protocol protocol;
-    PrepToken token; 
+    PrepToken token;
     Vault vault;
     MockPriceFeed feed;
     address user = makeAddr("user");
@@ -82,7 +82,7 @@ contract ProtocolTest is Test {
         vm.expectRevert();
         protocol.increasePosition(600 ether);
 
-        vm.stopPrank(); 
+        vm.stopPrank();
     }
 
     function testDepositWhileLPExistShort() public {
