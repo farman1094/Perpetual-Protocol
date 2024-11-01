@@ -15,7 +15,7 @@ import {Vault} from "src/Vault.sol";
  * @author Mohd Farman
  * This system is designed to be as minimal as possible.
  * NOTE This system accept PrepToken as a collateral for both Trader and Liquidy Provider.
- * In this system you can open positions for Bitcoin
+ * In this system you can trade for positions for BTC. Short and long with leverage (15x).
  */
 contract Protocol is ReentrancyGuard {
     // errors
