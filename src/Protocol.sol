@@ -143,7 +143,8 @@ contract Protocol is ReentrancyGuard {
 
     /**
      * NOTE You can open position with collateral at 15% leverage rate
-     * @param _size the borrowing amount or position, @param _sizeOfToken the number of token you want to trade
+     * @param _size the borrowing amount or position, 
+     * @param _sizeOfToken the number of token you want to trade, 18 decimals (1 btc = 1e18) / (0.1 btc = 1e17)
      * @param _isLong (send true for long, false for short)
      */
     function openPosition(uint256 _size, uint256 _sizeOfToken, bool _isLong) external moreThanZero(_size) {
@@ -154,7 +155,7 @@ contract Protocol is ReentrancyGuard {
         if (_sizeOfToken == 0) {
             numOfToken = _getNumOfTokenByAmount(_size);
         } else {
-            uint256 valueofToken = _sizeOfToken * _getPriceOfBtc();
+            uint256 valueofToken = (_sizeOfToken * _getPriceOfBtc())/ PRECISION; // as we takin size in 18 decimals
             if (_size < valueofToken) revert Protocol__TokenValueIsMoreThanSize();
             numOfToken = _sizeOfToken;
         }
