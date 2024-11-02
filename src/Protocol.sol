@@ -34,6 +34,7 @@ contract Protocol is ReentrancyGuard {
     error Protocol__OnlyAdminCanUpdate();
     error Protocol__TokenValueIsMoreThanSize();
     error Protocol__CannotIncreaseSizeInLoss__FirstSettleTheExistDues();
+    error Protocol__UserCanOnlyHaveOnePositionOpened();
 
     using SignedMath for int256;
     using OracleLib for AggregatorV3Interface;
@@ -143,11 +144,14 @@ contract Protocol is ReentrancyGuard {
 
     /**
      * NOTE You can open position with collateral at 15% leverage rate
-     * @param _size the borrowing amount or position, 
+     * @param _size the borrowing amount or position,
      * @param _sizeOfToken the number of token you want to trade, 18 decimals (1 btc = 1e18) / (0.1 btc = 1e17)
      * @param _isLong (send true for long, false for short)
      */
     function openPosition(uint256 _size, uint256 _sizeOfToken, bool _isLong) external moreThanZero(_size) {
+        if (positions[msg.sender].isInitialized) {
+            revert Protocol__UserCanOnlyHaveOnePositionOpened();
+        }
         bool eligible = checkLeverageFactor(msg.sender, _size);
         if (!eligible) revert Protocol__LeverageLimitReached();
         uint256 numOfToken;
@@ -155,7 +159,7 @@ contract Protocol is ReentrancyGuard {
         if (_sizeOfToken == 0) {
             numOfToken = _getNumOfTokenByAmount(_size);
         } else {
-            uint256 valueofToken = (_sizeOfToken * _getPriceOfBtc())/ PRECISION; // as we takin size in 18 decimals
+            uint256 valueofToken = (_sizeOfToken * _getPriceOfBtc()) / PRECISION; // as we takin size in 18 decimals
             if (_size < valueofToken) revert Protocol__TokenValueIsMoreThanSize();
             numOfToken = _sizeOfToken;
         }
