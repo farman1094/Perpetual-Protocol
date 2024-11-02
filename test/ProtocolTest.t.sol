@@ -79,8 +79,8 @@ contract ProtocolTest is Test {
         token.approve(address(protocol), 100 ether);
         protocol.depositCollateral(100 ether);
         protocol.openPosition(1500 ether, 25000000000000000, false);
-        // vm.expectRevert();
-        // protocol.increasePosition(600 ether);
+        vm.expectRevert();
+        protocol.increasePosition(600 ether);
 
         vm.stopPrank();
     }
