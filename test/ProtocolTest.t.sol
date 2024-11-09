@@ -35,10 +35,23 @@ contract ProtocolTest is Test {
         vm.stopBroadcast();
     }
 
-    function testCheckBasicMath() public view {
+    function testConfirmVaultddress() public {
         address vaultAddr = protocol.getVaultAddress();
         assert(vaultAddr == address(vault));
+        testForLiquidityResreves();
+        vm.startPrank(msg.sender);
+        token.mint();
+
+        token.approve(address(protocol), 100 ether);
+        protocol.depositCollateral(100 ether);
+        protocol.openPosition(1000 ether, 0, true);
+        feed.updateAnswer(56000e8);
+
+        uint256 num = protocol.liquidityReservesToHold();
+        assert(num == 0);
+        console.log("NUM" , num);
     }
+
 
     function testForLiquidityResreves() public {
         vm.startPrank(user);

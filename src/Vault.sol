@@ -73,10 +73,13 @@ contract Vault is ERC4626 {
         view
         returns (uint256 amountToHoldForUser, uint256 balanceOfUser)
     {
+        balanceOfUser = balanceOf(_owner);
         uint256 amountToHold = protocol.liquidityReservesToHold();
+        if(amountToHold == 0) {
+            return (0, balanceOfUser);
+        }
         uint256 totalSupplyOfToken = totalAssets();
         uint256 percentToHold = ((amountToHold * 100) / totalSupplyOfToken);
-        balanceOfUser = balanceOf(_owner);
         amountToHoldForUser = (balanceOfUser / 100) * percentToHold;
 
         return (amountToHoldForUser, balanceOfUser);

@@ -4,7 +4,6 @@ pragma solidity ^0.8.24;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {SignedMath} from "@openzeppelin/contracts/utils/math/SignedMath.sol";
-
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {Vault} from "src/Vault.sol";
 
@@ -33,6 +32,7 @@ contract Protocol is ReentrancyGuard {
     error Protocol__TokenValueIsMoreThanSize();
     error Protocol__CollateralReserveIsNotAvailable();
     error Protocol__CannotIncreaseSizeInLoss__FirstSettleTheExistDues();
+    error Protocol__PositionAlreadyOpened();
 
     using SignedMath for int256;
 
@@ -133,11 +133,6 @@ contract Protocol is ReentrancyGuard {
         positions[msg.sender].sizeOfToken += numOfToken;
 
         updateTotalAccounting(positions[msg.sender].isLong, _size, numOfToken);
-        // if (positions[msg.sender].isLong) {
-        //     _increaseTotalLongPosition(_size, numOfToken);
-        // } else {
-        //     _increaseTotalShortPosition(_size, numOfToken);
-        // }
     }
 
     /**
@@ -146,7 +141,9 @@ contract Protocol is ReentrancyGuard {
      * @param _isLong (send true for long, false for short)
      */
     function openPosition(uint256 _size, uint256 _sizeOfToken, bool _isLong) external moreThanZero(_size) {
-        
+        if(positions[msg.sender].isInitialized) {
+            revert Protocol__PositionAlreadyOpened();
+        }
         uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
         if (totalReserve == 0) revert Protocol__CollateralReserveIsNotAvailable();
 
@@ -173,12 +170,6 @@ contract Protocol is ReentrancyGuard {
 
         // get the total of short or long;
         updateTotalAccounting(_isLong, _size, numOfToken);
-        // if (positions[msg.sender].isLong) {
-        //     _increaseTotalLongPosition(_size, numOfToken);
-        // } else {
-        //     _increaseTotalShortPosition(_size, numOfToken);
-        // }
-
         s_numOfOpenPositions++;
     }
 
@@ -264,7 +255,12 @@ contract Protocol is ReentrancyGuard {
             amountToHold = amountToKeep;
         } else {
             uint256 profitToLps = totalPnLForUser.abs();
-            amountToHold = amountToKeep - profitToLps;
+            // if(profitToLps >= amountToKeep) {
+            //     amountToHold = 0;
+            // } else {
+            // amountToHold = amountToKeep - profitToLps;
+            // }
+            amountToHold = profitToLps >= amountToKeep ? 0 : amountToKeep - profitToLps;
         }
         return amountToHold;
     }
@@ -345,8 +341,8 @@ contract Protocol is ReentrancyGuard {
 
     function _checkPnLForShort(int256 size, int256 token) internal view returns (int256) {
         int256 actualValue = _getActualValueOfToken(token); // toInt256( * _getPriceOfBtc());
-
         int256 PnL = size - actualValue;
+        
 
         return PnL;
     }
