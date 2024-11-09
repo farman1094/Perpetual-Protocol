@@ -50,6 +50,8 @@ contract ProtocolTest is Test {
         uint256 num = protocol.liquidityReservesToHold();
         assert(num == 0);
         console.log("NUM" , num);
+        vm.expectRevert();
+        protocol.openPosition(500 ether, 0, false);
     }
 
 
