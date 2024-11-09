@@ -120,8 +120,8 @@ contract Protocol is ReentrancyGuard {
 
     // Note only Open position size can be increased and traders in loss cannot increase positions
     function increasePosition(uint256 _size) external moreThanZero(_size) {
-        Position memory UserPosition = positions[msg.sender];
-        if (UserPosition.isInitialized == false) {
+        // Position memory UserPosition = positions[msg.sender];
+        if (positions[msg.sender].isInitialized == false) {
             revert Protocol__OpenPositionFirst();
         }
         int256 PnL = _checkProfitOrLossForUser(msg.sender);
@@ -132,11 +132,12 @@ contract Protocol is ReentrancyGuard {
         positions[msg.sender].size += _size;
         positions[msg.sender].sizeOfToken += numOfToken;
 
-        if (positions[msg.sender].isLong) {
-            _increaseTotalLongPosition(_size, numOfToken);
-        } else {
-            _increaseTotalShortPosition(_size, numOfToken);
-        }
+        updateTotalAccounting(positions[msg.sender].isLong, _size, numOfToken);
+        // if (positions[msg.sender].isLong) {
+        //     _increaseTotalLongPosition(_size, numOfToken);
+        // } else {
+        //     _increaseTotalShortPosition(_size, numOfToken);
+        // }
     }
 
     /**
@@ -171,11 +172,12 @@ contract Protocol is ReentrancyGuard {
         emit PositionOpened(msg.sender, _size);
 
         // get the total of short or long;
-        if (positions[msg.sender].isLong) {
-            _increaseTotalLongPosition(_size, numOfToken);
-        } else {
-            _increaseTotalShortPosition(_size, numOfToken);
-        }
+        updateTotalAccounting(_isLong, _size, numOfToken);
+        // if (positions[msg.sender].isLong) {
+        //     _increaseTotalLongPosition(_size, numOfToken);
+        // } else {
+        //     _increaseTotalShortPosition(_size, numOfToken);
+        // }
 
         s_numOfOpenPositions++;
     }
@@ -298,15 +300,17 @@ contract Protocol is ReentrancyGuard {
     }
 
     // These functions used for the accounting for total open positions
-    function _increaseTotalLongPosition(uint256 _size, uint256 _numOfToken) internal {
+    function updateTotalAccounting(bool isLong, uint256 _size, uint256 _numOfToken) internal {
+        if(isLong){
         longPosition.totalSize += _size;
         longPosition.totalSizeOfToken += _numOfToken;
-    }
-
-    function _increaseTotalShortPosition(uint256 _size, uint256 _numOfToken) internal {
+        } else {
         shortPosition.totalSize += _size;
         shortPosition.totalSizeOfToken += _numOfToken;
+        }
     }
+
+    // function _increaseTotalShortPosition(uint256 _size, uint256 _numOfToken) internal {}
 
     // It return the Actutal value of token by number of token. (sizeOfToken * curentPrice)
     function _getActualValueOfToken(int256 _sizeOfToken) internal view returns (int256 actuaTokenValue) {
