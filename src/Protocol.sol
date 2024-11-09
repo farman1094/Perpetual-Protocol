@@ -154,7 +154,7 @@ contract Protocol is ReentrancyGuard {
         if (_sizeOfToken == 0) {
             numOfToken = _getNumOfTokenByAmount(_size);
         } else {
-            uint256 valueofToken = (_sizeOfToken * _getPriceOfBtc())/ PRECISION;
+            uint256 valueofToken = (_sizeOfToken * _getPriceOfBtc())/ PRECISION; // size of token in 1e18
             if (_size < valueofToken) revert Protocol__TokenValueIsMoreThanSize();
             numOfToken = _sizeOfToken;
         }

@@ -86,7 +86,7 @@ The `Protocol` contract manages trader actions, including depositing collateral,
    - **Purpose**: Opens a leveraged position, either long (betting BTC will increase) or short (betting BTC will decrease).
    - **Parameters**:
      - `_size` (uint256): The total amount the trader wishes to borrow (leverage).
-     - `_sizeOfToken` (uint256): The number of BTC tokens desired. If set to `0`, the contract will automatically calculate the number of tokens based on `_size` and BTC price.
+     - `_sizeOfToken` (uint256): The number of BTC tokens desired. If set to `0`, the contract will automatically calculate the number of tokens based on `_size` and BTC price. It take value with 18 decimal (1e18 = 1) (1e17 = 0.1).
      - `_isLong` (bool): `true` if the trader is opening a long position, `false` for a short position.
    - **Usage**:
      - `_size` must be less than or equal to `depositCollateral * 15`.
