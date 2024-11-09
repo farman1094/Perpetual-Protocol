@@ -208,7 +208,12 @@ contract ProtocolTest is Test {
         // protocol.withdrawCollateral(100 ether);
         vm.stopPrank();
     }
-
+     function testGetterFunctionShoulsdasdNotRevert() public view {
+        protocol.checkProfitOrLossForUser(user);
+        protocol.getTotalLongPositions();
+        protocol.getTotalShortPositions();
+        protocol.getPositionDetails(msg.sender);
+     }
     function testGetterFunctionShouldNotRevert() public view {
         protocol.checkProfitOrLossForUser(user);
         protocol.getTotalLongPositions();
