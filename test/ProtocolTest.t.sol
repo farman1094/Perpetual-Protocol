@@ -35,7 +35,34 @@ contract ProtocolTest is Test {
         vm.stopBroadcast();
     }
 
-    function testConfirmVaultddress() public {
+
+    function testBorrowingFees() public view {
+        uint256 time = block.timestamp ;
+        console.log("time", time);
+        uint256 borrowingFee = protocol.calculateBorrowFee(10000 ether, 0);
+        console.log("borrowingFee", borrowingFee);
+
+        // testForLiquidityResreves();
+        // vm.startPrank(msg.sender);
+        // token.mint();
+
+        // token.approve(address(protocol), 100 ether);
+        // protocol.depositCollateral(100 ether);
+        // protocol.openPosition(1000 ether, false);
+
+
+        // (uint256 remainingSize,uint256 numOfToken) = protocol.decreasePostion(900 ether);
+        // uint256 size = 789545484 ether;
+        // uint256 token1 = protocol.getNumOfTokenByAmount(size);
+        // uint256 price = protocol._getPriceOfPurchase( size, token1);
+
+        // console.log("token", token1);
+        // console.log("price", price);
+        // assert (borrowingFee == 225 ether);
+    }
+
+
+    function testCheckBasicMath() public {
         address vaultAddr = protocol.getVaultAddress();
         assert(vaultAddr == address(vault));
         testForLiquidityResreves();
@@ -44,14 +71,15 @@ contract ProtocolTest is Test {
 
         token.approve(address(protocol), 100 ether);
         protocol.depositCollateral(100 ether);
-        protocol.openPosition(1000 ether, 0, true);
-        feed.updateAnswer(56000e8);
 
-        uint256 num = protocol.liquidityReservesToHold();
-        assert(num == 0);
-        console.log("NUM" , num);
-        vm.expectRevert();
-        protocol.openPosition(500 ether, 0, false);
+        protocol.openPosition(1000 ether, false);
+        console.log("1st Position---------------------------------------");
+        protocol.increasePosition(500 ether);
+        uint256 totalSize = protocol.getNumOfOpenPositions();
+        // protocol.liquidityReservesToHold();
+        console.log("totalSize", totalSize);
+        // vm.expectRevert();
+        // protocol.increasePosition(600 ether);
     }
 
 
@@ -93,7 +121,8 @@ contract ProtocolTest is Test {
 
         token.approve(address(protocol), 100 ether);
         protocol.depositCollateral(100 ether);
-        protocol.openPosition(1000 ether, 0, false);
+
+        protocol.openPosition(1500 ether, false);
         vm.expectRevert();
         protocol.increasePosition(600 ether);
 
@@ -106,7 +135,7 @@ contract ProtocolTest is Test {
         token.mint();
         token.approve(address(protocol), 100 ether);
         protocol.depositCollateral(100 ether);
-        protocol.openPosition(1500 ether, 0, false);
+        protocol.openPosition(1500 ether, false);
 
         // Closing Positions -----------------------------------
         int256 updateAnswer = 64000e8;
@@ -126,14 +155,14 @@ contract ProtocolTest is Test {
         token.mint();
         token.approve(address(protocol), 100 ether);
         protocol.depositCollateral(100 ether);
-        protocol.openPosition(1000 ether, 0, true);
+        protocol.openPosition(1000 ether, true);
         vm.stopPrank();
 
         vm.startPrank(msg.sender);
         token.mint();
         token.approve(address(protocol), 100 ether);
         protocol.depositCollateral(100 ether);
-        protocol.openPosition(1500 ether, 0, false);
+        protocol.openPosition(1500 ether, false);
 
         // Price update
         int256 updateAnswer = 5400000000000;
@@ -177,7 +206,7 @@ contract ProtocolTest is Test {
         token.mint();
         token.approve(address(protocol), 100 ether);
         protocol.depositCollateral(100 ether);
-        protocol.openPosition(1000 ether, 0, false);
+        protocol.openPosition(1000 ether, false);
 
         // Closing Positions -----------------------------------
         // int256 updateAnswer = 54000e8;
@@ -197,7 +226,7 @@ contract ProtocolTest is Test {
         assert(protocol.getCollateralBalance() == 100 ether);
 
         // Opening Positions ------------------------------------
-        protocol.openPosition(1500 ether, 0, true);
+        protocol.openPosition(1500 ether, true);
         assert(protocol.getNumOfOpenPositions() == 1);
 
         (uint256 size, uint256 sizeOfToken, bool isLong,) = protocol.getPositionDetails(msg.sender);

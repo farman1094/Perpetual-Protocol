@@ -5,6 +5,9 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {SignedMath} from "@openzeppelin/contracts/utils/math/SignedMath.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {OracleLib} from "./libraries/OracleLib.sol";
+import {console} from "forge-std/console.sol";
+
 import {Vault} from "src/Vault.sol";
 
 /**
@@ -20,11 +23,12 @@ contract Protocol is ReentrancyGuard {
     error Protocol__FundsNotAvailableForPosition();
     error Protocol__CurrentlyNumberIsZero();
 
+    error Protocol__CannotDecreaseSizeMoreThanPosition();
     error Protocol__DepositFailed();
     error Protocol__RedeemFailed();
     error Protocol__LiquidationFailed();
     error Protocol__LeverageLimitReached();
-    error Protocol__UserNotEnoughBalance();
+    error Protocol__UserNotHaveEnoughBalance();
     error Protocol__CannotWithdrawWithOpenPosition();
     error Protocol__OpenPositionFirst();
     error Protocol__AlreadyUpdated();
@@ -32,13 +36,19 @@ contract Protocol is ReentrancyGuard {
     error Protocol__TokenValueIsMoreThanSize();
     error Protocol__CollateralReserveIsNotAvailable();
     error Protocol__CannotIncreaseSizeInLoss__FirstSettleTheExistDues();
-    error Protocol__PositionAlreadyOpened();
+    error Protocol__UserCanOnlyHaveOnePositionOpened();
+    error Protocol__PositionClosingFailed();
 
     using SignedMath for int256;
+    using OracleLib for AggregatorV3Interface;
+
 
     struct Position {
+
+        uint256 id; // With Id Arbitary's actor can check if trader is liquidable or not
         uint256 size; // BorrowedMoney
         uint256 sizeOfToken; //Token Purchased from Borrowed Money
+        uint256 openAt; // Time when position opened
         bool isLong; // Define type: LONG (True) / SHORT (false)
         bool isInitialized; // Initialized or not
     }
@@ -53,17 +63,22 @@ contract Protocol is ReentrancyGuard {
         uint256 totalSizeOfToken;
     }
 
-    Vault private vault;
 
     //////////////////////////
     // State variables
     //////////////////////////
+    Vault private vault;
+    uint256 private s_numOfOpenPositions;
+    uint256[] private s_availableIdsToUse;
 
     uint256 constant LEVERAGE_RATE = 15; // Leverage rate if 10$ can open the position for $150
     uint256 constant LIQUIDITY_THRESHOLD = 15; // if total supply is 100, lp's have to keep 15% in the pool any loses (15+lose) (15 - profit)
 
-    uint256 constant PRICE_PRECISION = 1e10;
+    uint256 constant BORROWING_RATE_PER_YEAR = 15; // the percent lp's have to hold in the pool
+    uint256 constant HELPER_TO_CALCULATE_PERCENTAGE = 100; // To get Percentage Helper
+    uint256 constant YEAR_IN_SECONDS = 31536000; //31,536,000 seconds in a year
     uint256 constant PRECISION = 1e18;
+    uint256 constant PRICE_PRECISION = 1e10;
 
     address immutable i_acceptedCollateral;
     address immutable i_ADMIN; // Admin to update Vault Address
@@ -72,8 +87,8 @@ contract Protocol is ReentrancyGuard {
     bool private alreadyUpdated = false;
 
     mapping(address => Position) positions;
+    mapping(uint256 => Position) positionsById;
     mapping(address => uint256) s_collateralOfUser;
-    uint256 private s_numOfOpenPositions;
     // address constant token = 0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43; // Price Feed adress for token/USD
 
     LongPosition public longPosition;
@@ -126,51 +141,104 @@ contract Protocol is ReentrancyGuard {
         }
         int256 PnL = _checkProfitOrLossForUser(msg.sender);
         if (PnL < 0) revert Protocol__CannotIncreaseSizeInLoss__FirstSettleTheExistDues();
-        bool eligible = checkLeverageFactor(msg.sender, _size);
+        bool eligible = _checkLeverageFactor(msg.sender, _size);
         if (!eligible) revert Protocol__LeverageLimitReached();
         uint256 numOfToken = _getNumOfTokenByAmount(_size);
         positions[msg.sender].size += _size;
         positions[msg.sender].sizeOfToken += numOfToken;
+        positionsById[positions[msg.sender].id] = positions[msg.sender];
+        emit PositionOpened(msg.sender, _size); 
+        updateTotalAccountingForAdding(positions[msg.sender].isLong, _size, numOfToken);
+        // if (positions[msg.sender].isLong) {
+        //     _increaseTotalLongPosition(_size, numOfToken);
+        // } else {
+        //     _increaseTotalShortPosition(_size, numOfToken);
+        // }
+    }
 
-        updateTotalAccounting(positions[msg.sender].isLong, _size, numOfToken);
+
+    /** @param sizeToDec is the size need to increase should be in 18 dec */
+    function decreasePostion(uint256 sizeToDec) external moreThanZero(sizeToDec) {
+        Position memory userToDec = positions[msg.sender];
+        if (userToDec.isInitialized == false) {
+            revert Protocol__OpenPositionFirst();
+        }
+        if(userToDec.size <= sizeToDec) {
+            revert Protocol__CannotDecreaseSizeMoreThanPosition();
+        }
+        uint256 priceOfPurchase = _getPriceOfPurchase(msg.sender);
+        uint256 remainingSize = userToDec.size - sizeToDec;
+        uint256 numOfRemainingToken = (remainingSize * PRECISION) / priceOfPurchase;
+        // correct accounting
+        positions[msg.sender].size = remainingSize;
+        positions[msg.sender].sizeOfToken = numOfRemainingToken;
+        positionsById[userToDec.id] = positions[msg.sender];
+
+        updateTotalAccountingForDecreasing(userToDec.isLong, sizeToDec, (userToDec.sizeOfToken - numOfRemainingToken));
+
+        // need to handle PnL and Borrowing fee
+     
     }
 
     /**
      * NOTE You can open position with collateral at 15% leverage rate
-     * @param _size the borrowing amount or position, @param _sizeOfToken the number of token you want to trade it take in 1e18
+
+     * @param _size the borrowing amount or position,
+   
      * @param _isLong (send true for long, false for short)
      */
-    function openPosition(uint256 _size, uint256 _sizeOfToken, bool _isLong) external moreThanZero(_size) {
-        if(positions[msg.sender].isInitialized) {
-            revert Protocol__PositionAlreadyOpened();
+
+     // removing sizeOfToken it affecting other functionalities and not needed because we have only one token to trade on
+    function openPosition(uint256 _size, bool _isLong) external moreThanZero(_size) {
+        if (positions[msg.sender].isInitialized) {
+            revert Protocol__UserCanOnlyHaveOnePositionOpened();
         }
         uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
         if (totalReserve == 0) revert Protocol__CollateralReserveIsNotAvailable();
 
         bool eligible = checkLeverageFactor(msg.sender, _size);
         if (!eligible) revert Protocol__LeverageLimitReached();
-        uint256 numOfToken;
+       
 
-        if (_sizeOfToken == 0) {
-            numOfToken = _getNumOfTokenByAmount(_size);
+        s_numOfOpenPositions++;
+        uint256 _id;
+        
+        if(s_availableIdsToUse.length > 0) {
+            _id = s_availableIdsToUse[s_availableIdsToUse.length - 1];
+            s_availableIdsToUse.pop();
         } else {
-            uint256 valueofToken = (_sizeOfToken * _getPriceOfBtc())/ PRECISION; // size of token in 1e18
-            if (_size < valueofToken) revert Protocol__TokenValueIsMoreThanSize();
-            numOfToken = _sizeOfToken;
+            _id = s_numOfOpenPositions;
         }
 
-        if (_isLong) {
+
+        // if (_sizeOfToken == 0) {
+        // } else {
+        //     uint256 valueofToken = (_sizeOfToken * _getPriceOfBtc()) / PRECISION; // as we takin size in 18 decimals
+        //     if (_size < valueofToken) revert Protocol__TokenValueIsMoreThanSize();
+        //     numOfToken = _sizeOfToken;
+        // }
+        uint256 numOfToken = _getNumOfTokenByAmount(_size);
+
+
+        // if (_isLong) {
             // position for long
-            positions[msg.sender] = Position({size: _size, sizeOfToken: numOfToken, isLong: true, isInitialized: true});
-        } else {
-            //position for short
-            positions[msg.sender] = Position({size: _size, sizeOfToken: numOfToken, isLong: false, isInitialized: true});
-        }
+            positions[msg.sender] = Position({id: _id, size: _size, sizeOfToken: numOfToken, openAt: block.timestamp, isLong: _isLong, isInitialized: true});
+            positionsById[_id] = positions[msg.sender];
+        // } else {
+        //     //position for short
+        //     positions[msg.sender] = Position({id: s_numOfOpenPositions, size: _size, sizeOfToken: numOfToken, openAt: block.timestamp, isLong: false, isInitialized: true});
+        //     positionsById[s_numOfOpenPositions] = Position({id: s_numOfOpenPositions, size: _size, sizeOfToken: numOfToken, openAt: block.timestamp, isLong: false, isInitialized: true});
+        // }
         emit PositionOpened(msg.sender, _size);
 
         // get the total of short or long;
-        updateTotalAccounting(_isLong, _size, numOfToken);
-        s_numOfOpenPositions++;
+
+        updateTotalAccountingForAdding(_isLong, _size, numOfToken);
+        // if (positions[msg.sender].isLong) {
+        //     _increaseTotalLongPosition(_size, numOfToken);
+        // } else {
+        //     _increaseTotalShortPosition(_size, numOfToken);
+        // }
     }
 
     // Function to close the position and clear the dues, For both Profit and loss cases.
@@ -182,19 +250,21 @@ contract Protocol is ReentrancyGuard {
         }
 
         int256 PnL = _checkProfitOrLossForUser(msg.sender);
+        uint256 borrowingFee = _calculateBorrowFee(userToClose.size, userToClose.openAt);
         // Update the total Accounting
-        if (userToClose.isLong) {
-            longPosition.totalSize -= userToClose.size;
-            longPosition.totalSizeOfToken -= userToClose.sizeOfToken;
-        } else {
-            shortPosition.totalSize -= userToClose.size;
-            shortPosition.totalSizeOfToken -= userToClose.sizeOfToken;
-        }
-
         // reset the mapping
         delete positions[msg.sender]; //confirm the position
-        s_numOfOpenPositions--;
+        delete positionsById[userToClose.id];
+
+        // use Id later
+        s_availableIdsToUse.push(userToClose.id);
         emit PositionClose(msg.sender, userToClose.size);
+
+        // s_numOfOpenPositions--; it would not happen becuase we save the deleted it to use it on the new one
+
+        // Deduct Collateral
+        s_collateralOfUser[msg.sender] -= borrowingFee;
+
 
         if (PnL > 0) {
             uint256 profit = PnL.abs(); // convert int to uint256
@@ -202,9 +272,19 @@ contract Protocol is ReentrancyGuard {
             IERC20(i_acceptedCollateral).transferFrom(address(vault), address(this), profit);
         } else if (PnL < 0) {
             uint256 loss = PnL.abs();
-            bool success = _liquidateUser(msg.sender, loss);
-            if (!success) revert Protocol__RedeemFailed();
+            bool success = _closePositionInLoss(msg.sender, loss);
+            if (!success) revert Protocol__PositionClosingFailed();
         }
+
+        updateTotalAccountingForDecreasing(userToClose.isLong, userToClose.size, userToClose.sizeOfToken);
+
+        // if (userToClose.isLong) {
+        //     longPosition.totalSize -= userToClose.size;
+        //     longPosition.totalSizeOfToken -= userToClose.sizeOfToken;
+        // } else {
+        //     shortPosition.totalSize -= userToClose.size;
+        //     shortPosition.totalSizeOfToken -= userToClose.sizeOfToken;
+        // }
     }
 
     /**
@@ -213,14 +293,14 @@ contract Protocol is ReentrancyGuard {
      */
     function withdrawCollateral(uint256 _amount) external moreThanZero(_amount) nonReentrant {
         Position memory UserPosition = positions[msg.sender];
-        if (UserPosition.isInitialized) {
-            if (UserPosition.size != 0) {
+        if (UserPosition.isInitialized) { 
+            if (UserPosition.size != 0) {  // check the scenario it can be zero
                 revert Protocol__CannotWithdrawWithOpenPosition();
             }
         }
 
         if (s_collateralOfUser[msg.sender] < _amount) {
-            revert Protocol__UserNotEnoughBalance();
+            revert Protocol__UserNotHaveEnoughBalance();
         }
 
         s_collateralOfUser[msg.sender] -= _amount;
@@ -269,6 +349,28 @@ contract Protocol is ReentrancyGuard {
     // Internals Functions
     //////////////////////////
 
+    // function get Price of purchase
+    function _getPriceOfPurchase(address sender) public view returns (uint256 price) {
+         // price = (size * PRECISION) / sizeOfToken;
+        price = (positions[sender].size * PRECISION) / positions[sender].sizeOfToken;
+        return price;
+
+    }
+
+    // Calculate borrowing fee
+    function _calculateBorrowFee(uint256 size, uint256 openAt) internal view returns (uint256 borrowingFee) {
+        uint256 timePassed = block.timestamp - openAt;
+        console.log("Time Passed: %s ", timePassed);
+        uint256 holdAmount = (size * LIQUIDITY_THRESHOLD) / HELPER_TO_CALCULATE_PERCENTAGE;
+        console.log("Hold Amount: %s", holdAmount);
+        uint256 rate = (BORROWING_RATE_PER_YEAR * PRECISION) / (HELPER_TO_CALCULATE_PERCENTAGE * YEAR_IN_SECONDS); // (15 / 100  * 1e18(divide later)) * (1 * 31536000)  
+        console.log("Rate: %s ", rate);
+        borrowingFee = (rate * timePassed * holdAmount) / PRECISION;
+        console.log("borrowingFee %s", borrowingFee);
+        return borrowingFee;
+        // return 0;
+    }
+
     /**
      * @dev Internal fucntion must not be called from outside. Getter function available to use these.
      */
@@ -291,25 +393,59 @@ contract Protocol is ReentrancyGuard {
     // Return 15% of totalSupply of Reserves
     function _getAmountToHoldInPool() internal view returns (uint256 amountToKeep) {
         uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
-        amountToKeep = (totalReserve / 100) * LIQUIDITY_THRESHOLD;
+
+        amountToKeep = (totalReserve * LIQUIDITY_THRESHOLD) / HELPER_TO_CALCULATE_PERCENTAGE ;
         return amountToKeep;
     }
 
     // These functions used for the accounting for total open positions
-    function updateTotalAccounting(bool isLong, uint256 _size, uint256 _numOfToken) internal {
+
+    function updateTotalAccountingForAdding( bool isLong, uint256 _size, uint256 _numOfToken) internal {
         if(isLong){
         longPosition.totalSize += _size;
-        longPosition.totalSizeOfToken += _numOfToken;
-        } else {
+        longPosition.totalSizeOfToken += _numOfToken;}
+        else {
         shortPosition.totalSize += _size;
         shortPosition.totalSizeOfToken += _numOfToken;
+
+        }
+    }
+     function updateTotalAccountingForDecreasing( bool isLong, uint256 _size, uint256 _numOfToken) internal {
+        if(isLong){
+        longPosition.totalSize -= _size;
+        longPosition.totalSizeOfToken -= _numOfToken;}
+        else {
+        shortPosition.totalSize -= _size;
+        shortPosition.totalSizeOfToken -= _numOfToken;
+
         }
     }
 
-    // function _increaseTotalShortPosition(uint256 _size, uint256 _numOfToken) internal {}
+    // function _increaseTotalShortPosition(bool isLong, uint256 _size, uint256 _numOfToken) internal {
+    //     if(isLong){
+    //     longPosition.totalSize -= _size;
+    //     longPosition.totalSizeOfToken += _numOfToken;}
+    //     else {
+    //     shortPosition.totalSize += _size;
+    //     shortPosition.totalSizeOfToken += _numOfToken;
+
+    //     }
+    // }
+    //  function updateTotalAccountingForDecreasing( bool isLong, uint256 _size, uint256 _numOfToken) internal {
+    //     if(isLong){
+    //     longPosition.totalSize -= _size;
+    //     longPosition.totalSizeOfToken -= _numOfToken;}
+    //     else {
+    //     shortPosition.totalSize -= _size;
+    //     shortPosition.totalSizeOfToken -= _numOfToken;
+
+    //     }
+    // }
+
+    // function _increaseTotalShortPosition(uint256 _size, uint256 _numOfToken) internal {
 
     // It return the Actutal value of token by number of token. (sizeOfToken * curentPrice)
-    function _getActualValueOfToken(int256 _sizeOfToken) internal view returns (int256 actuaTokenValue) {
+    function _getActualValueOfToken(int256 _sizeOfToken) public view returns (int256 actuaTokenValue) {
         actuaTokenValue = toInt256((_getPriceOfBtc() * _sizeOfToken.abs()) / 1e18);
         return actuaTokenValue;
     }
@@ -317,7 +453,7 @@ contract Protocol is ReentrancyGuard {
     /**
      * @dev This function is called is used in situation of losses, When trader come to close position
      */
-    function _liquidateUser(address user, uint256 lossToCover) internal returns (bool) {
+    function _closePositionInLoss(address user, uint256 lossToCover) internal returns (bool) {
         uint256 userBal = s_collateralOfUser[user];
         uint256 amountToCover;
         //  uint256 amountToCover = userBal >= loss ? loss : s_collateralOfUser[user];
@@ -360,6 +496,14 @@ contract Protocol is ReentrancyGuard {
         return success;
     }
 
+       function _checkLeverageFactor(address sender, uint256 _size) internal view returns (bool) {
+        if (positions[sender].isInitialized) {
+            return _checkLeverageFactorForExisting(sender, _size);
+        } else {
+            return _checkLeverageFactorForNew(sender, _size);
+        }
+    }
+
     // to check leverage percentage for new users as per approved
     function _checkLeverageFactorForNew(address sender, uint256 _size) internal view returns (bool) {
         uint256 collateralOfUser = s_collateralOfUser[sender];
@@ -395,16 +539,27 @@ contract Protocol is ReentrancyGuard {
     }
 
     function _getPriceOfBtc() internal view returns (uint256 price) {
-        (, int256 answer,,,) = AggregatorV3Interface(i_BTC).latestRoundData();
-        price = uint256(answer); // price return amount with e8 (correcting it)
-        return price * PRICE_PRECISION;
+
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(i_BTC);
+        (, int256 answer,,,) = priceFeed.staleCheckLatestRoundData(); // Lib use
+        // price return amount with e8 (correcting it)
+        return uint256(answer) * PRICE_PRECISION; //Making it (Price)e18
     }
 
     //////////////////////////
     // Getters and View function
     //////////////////////////
 
+
+
+    // Get the ids which are not in use
+    // You can use id's `s_numOfOpenPositions` excluding this id
+    function getIdsNotInUse() public view returns (uint256[] memory) {
+        return s_availableIdsToUse;
+    }
+
     //  If users doesn't have open position it will return 0
+    /** @dev need to check */
     function checkProfitOrLossForUser(address _user) public view returns (int256 PnL) {
         Position memory userToClose = positions[_user];
         if (userToClose.isInitialized == false) {
@@ -474,10 +629,11 @@ contract Protocol is ReentrancyGuard {
 
     // Check your size limit if it can be approved (If already deposited)
     function checkLeverageFactor(address sender, uint256 _size) public view returns (bool) {
-        if (positions[sender].isInitialized) {
-            return _checkLeverageFactorForExisting(sender, _size);
-        } else {
-            return _checkLeverageFactorForNew(sender, _size);
-        }
+      return _checkLeverageFactor(sender, _size);
+    }
+
+    // Calculate the borrowing fee for test
+    function calculateBorrowFee(uint256 size, uint256 openAt) public view returns (uint256 borrowingFee) {
+    return _calculateBorrowFee (size, openAt);
     }
 }
