@@ -6,13 +6,11 @@ pragma solidity ^0.8.18;
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
 /**
- * @title DSCEngine
+ * @title Protocol Oracle Library
  * @author Mohd Farman
  * @notice This library is used to check the chainlink Oracle for stale data.
- * If a price is stable, the function will revert, and render the DSCEngine unusable - this is by design
- * We want DSCEngine to freeze if prices become stale
- *
- * So if the chainlink network explodes and you have a lot of money locked in the protocol... too bad
+ * If a price is stable, the function will revert, and render the Protocol unusable - this is by design
+ * We want Protocol to freeze if prices become stale
  */
 
 library OracleLib {

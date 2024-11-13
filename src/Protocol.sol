@@ -74,7 +74,7 @@ contract Protocol is ReentrancyGuard {
     uint256 constant LEVERAGE_RATE = 15; // Leverage rate if 10$ can open the position for $150
     uint256 constant LIQUIDITY_THRESHOLD = 15; // if total supply is 100, lp's have to keep 15% in the pool any loses (15+lose) (15 - profit)
 
-    uint256 constant BORROWING_RATE_PER_YEAR = 15; // the percent lp's have to hold in the pool
+    uint256 constant BORROWING_RATE_PER_YEAR = 15; // the interest rate on holding per year
     uint256 constant HELPER_TO_CALCULATE_PERCENTAGE = 100; // To get Percentage Helper
     uint256 constant YEAR_IN_SECONDS = 31536000; //31,536,000 seconds in a year
     uint256 constant PRECISION = 1e18;
