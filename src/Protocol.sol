@@ -24,8 +24,10 @@ contract Protocol is ReentrancyGuard {
     error Protocol__CurrentlyNumberIsZero();
 
     error Protocol__CannotDecreaseSizeMoreThanPosition();
+    error Protocol__RedeemOrFeeTransferFailed();    
+    error Protocol__PnLNotHandled();
     error Protocol__DepositFailed();
-    error Protocol__RedeemFailed();
+    // error Protocol__RedeemFailed();
     error Protocol__LiquidationFailed();
     error Protocol__LeverageLimitReached();
     error Protocol__UserNotHaveEnoughBalance();
@@ -38,6 +40,7 @@ contract Protocol is ReentrancyGuard {
     error Protocol__CannotIncreaseSizeInLoss__FirstSettleTheExistDues();
     error Protocol__UserCanOnlyHaveOnePositionOpened();
     error Protocol__PositionClosingFailed();
+    // error Protocol__FeeTransferFailed();
 
     using SignedMath for int256;
     using OracleLib for AggregatorV3Interface;
@@ -169,14 +172,29 @@ contract Protocol is ReentrancyGuard {
         uint256 priceOfPurchase = _getPriceOfPurchase(msg.sender);
         uint256 remainingSize = userToDec.size - sizeToDec;
         uint256 numOfRemainingToken = (remainingSize * PRECISION) / priceOfPurchase;
+
+        //send amount to vault pending
+        uint256 borrowingFee = _calculateBorrowFee(userToDec.size, userToDec.openAt); // paid fees till now
+        s_collateralOfUser[msg.sender] -= borrowingFee; // we have taken a borrowing fee till now
+        _redeemCollateral(address(vault), borrowingFee);
+       
+
+       
+        // need to handle PnL here
+       bool requireSuccess = _handleProfitAndLossWhileDecreasing(sizeToDec, msg.sender);
+       if(!requireSuccess) revert Protocol__PnLNotHandled();
+        
+        // Deduct Collateral
+       
+
         // correct accounting
         positions[msg.sender].size = remainingSize;
         positions[msg.sender].sizeOfToken = numOfRemainingToken;
+        positions[msg.sender].openAt = block.timestamp; // time reset according to new size (old size till now fees taken)
         positionsById[userToDec.id] = positions[msg.sender];
 
         updateTotalAccountingForDecreasing(userToDec.isLong, sizeToDec, (userToDec.sizeOfToken - numOfRemainingToken));
 
-        // need to handle PnL and Borrowing fee
      
     }
 
@@ -266,15 +284,17 @@ contract Protocol is ReentrancyGuard {
         s_collateralOfUser[msg.sender] -= borrowingFee;
 
 
-        if (PnL > 0) {
-            uint256 profit = PnL.abs(); // convert int to uint256
-            s_collateralOfUser[msg.sender] += profit;
-            IERC20(i_acceptedCollateral).transferFrom(address(vault), address(this), profit);
-        } else if (PnL < 0) {
-            uint256 loss = PnL.abs();
-            bool success = _closePositionInLoss(msg.sender, loss);
-            if (!success) revert Protocol__PositionClosingFailed();
-        }
+       bool requireSuccess = _handleProfitAndLoss(PnL, msg.sender);
+        if (!requireSuccess) revert Protocol__PnLNotHandled();
+        // if (PnL > 0) {
+        //     uint256 profit = PnL.abs(); // convert int to uint256
+        //     s_collateralOfUser[msg.sender] += profit;
+        //     IERC20(i_acceptedCollateral).transferFrom(address(vault), address(this), profit);
+        // } else if (PnL < 0) {
+        //     uint256 loss = PnL.abs();
+        //     bool success = _closePositionInLoss(msg.sender, loss);
+        //     if (!success) revert Protocol__PositionClosingFailed();
+        // }
 
         updateTotalAccountingForDecreasing(userToClose.isLong, userToClose.size, userToClose.sizeOfToken);
 
@@ -305,8 +325,7 @@ contract Protocol is ReentrancyGuard {
 
         s_collateralOfUser[msg.sender] -= _amount;
 
-        bool success = _redeemCollateral(msg.sender, _amount);
-        if (!success) revert Protocol__RedeemFailed();
+        _redeemCollateral(msg.sender, _amount);
     }
 
     /**
@@ -348,6 +367,35 @@ contract Protocol is ReentrancyGuard {
     //////////////////////////
     // Internals Functions
     //////////////////////////
+
+
+    // function to send amount to vault call !
+    // function _sendAmountToVault(address from, uint256 amountToTransfer) internal returns (bool) {}
+
+
+    function _handleProfitAndLoss(int256 PnL, address sender) internal returns (bool) {
+        // int256 PnL = _checkProfitOrLossForUser(sender);     
+        if (PnL > 0) {
+            uint256 profit = PnL.abs(); // convert int to uint256
+            s_collateralOfUser[sender] += profit;
+            IERC20(i_acceptedCollateral).transferFrom(address(vault), address(this), profit);
+        } else if (PnL < 0) {
+            uint256 loss = PnL.abs();
+            _closePositionInLoss(sender, loss);
+        }
+        return true;
+    }
+
+    /** @dev note complete it */ 
+
+    function _handleProfitAndLossWhileDecreasing( uint256 _sizeToDec, address _sender) internal returns (bool) {
+        int256 PnL = _checkProfitOrLossForUser(_sender);
+        int256 PnLtoCover = PnL * toInt256(_sizeToDec) / toInt256(positions[_sender].size);
+        return _handleProfitAndLoss(PnLtoCover, _sender);   
+
+    }
+
+
 
     // function get Price of purchase
     function _getPriceOfPurchase(address sender) public view returns (uint256 price) {
@@ -421,30 +469,6 @@ contract Protocol is ReentrancyGuard {
         }
     }
 
-    // function _increaseTotalShortPosition(bool isLong, uint256 _size, uint256 _numOfToken) internal {
-    //     if(isLong){
-    //     longPosition.totalSize -= _size;
-    //     longPosition.totalSizeOfToken += _numOfToken;}
-    //     else {
-    //     shortPosition.totalSize += _size;
-    //     shortPosition.totalSizeOfToken += _numOfToken;
-
-    //     }
-    // }
-    //  function updateTotalAccountingForDecreasing( bool isLong, uint256 _size, uint256 _numOfToken) internal {
-    //     if(isLong){
-    //     longPosition.totalSize -= _size;
-    //     longPosition.totalSizeOfToken -= _numOfToken;}
-    //     else {
-    //     shortPosition.totalSize -= _size;
-    //     shortPosition.totalSizeOfToken -= _numOfToken;
-
-    //     }
-    // }
-
-    // function _increaseTotalShortPosition(uint256 _size, uint256 _numOfToken) internal {
-
-    // It return the Actutal value of token by number of token. (sizeOfToken * curentPrice)
     function _getActualValueOfToken(int256 _sizeOfToken) public view returns (int256 actuaTokenValue) {
         actuaTokenValue = toInt256((_getPriceOfBtc() * _sizeOfToken.abs()) / 1e18);
         return actuaTokenValue;
@@ -453,7 +477,7 @@ contract Protocol is ReentrancyGuard {
     /**
      * @dev This function is called is used in situation of losses, When trader come to close position
      */
-    function _closePositionInLoss(address user, uint256 lossToCover) internal returns (bool) {
+    function _closePositionInLoss(address user, uint256 lossToCover) internal {
         uint256 userBal = s_collateralOfUser[user];
         uint256 amountToCover;
         //  uint256 amountToCover = userBal >= loss ? loss : s_collateralOfUser[user];
@@ -463,8 +487,7 @@ contract Protocol is ReentrancyGuard {
             amountToCover = s_collateralOfUser[user];
         }
         s_collateralOfUser[user] -= amountToCover;
-        bool success = _redeemCollateral(address(vault), amountToCover);
-        return success;
+        _redeemCollateral(address(vault), amountToCover);
     }
 
     // Check Profit or loss of user
@@ -489,11 +512,10 @@ contract Protocol is ReentrancyGuard {
         return int256(value);
     }
 
-    // Redeem
-    function _redeemCollateral(address receiver, uint256 amount) internal returns (bool success) {
-        //         s_collateralOfUser[receiver] -= amount;
-        success = IERC20(i_acceptedCollateral).transfer(receiver, amount);
-        return success;
+    // Amount transfers to vault (fees) or traders (reddeming collateral / Profit)
+    function _redeemCollateral(address receiver, uint256 amount) internal {
+        bool success = IERC20(i_acceptedCollateral).transfer(receiver, amount);
+        if (!success) revert Protocol__RedeemOrFeeTransferFailed();
     }
 
        function _checkLeverageFactor(address sender, uint256 _size) internal view returns (bool) {
