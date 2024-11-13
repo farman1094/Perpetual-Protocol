@@ -76,6 +76,9 @@ contract Protocol is ReentrancyGuard {
 
     uint256 constant LEVERAGE_RATE = 15; // Leverage rate if 10$ can open the position for $150
     uint256 constant LIQUIDITY_THRESHOLD = 15; // if total supply is 100, lp's have to keep 15% in the pool any loses (15+lose) (15 - profit)
+    uint256 constant LIQUIDATION_REWARD_BASIS = 50; // 50 / 10,000 (0.5%) of liquidable position
+    uint256 constant TOTAL_BASIS_POINT_HELPER = 10000; // to get the percentage
+
 
     uint256 constant BORROWING_RATE_PER_YEAR = 15; // the interest rate on holding per year
     uint256 constant HELPER_TO_CALCULATE_PERCENTAGE = 100; // To get Percentage Helper
@@ -372,6 +375,24 @@ contract Protocol is ReentrancyGuard {
     // function to send amount to vault call !
     // function _sendAmountToVault(address from, uint256 amountToTransfer) internal returns (bool) {}
 
+    function _checkLeverageOfPosition(address sender) public view returns (uint256) {
+        Position memory trader = positions[sender];
+        int256 PnL = _checkProfitOrLossForUser(sender);
+        uint256 userColl = s_collateralOfUser[sender];
+        int256 currCollateralOfUser;
+        if(PnL < 0){
+            if(PnL.abs() >= userColl) {
+                currCollateralOfUser = 1e18; // 0 is undefined by divind so 1
+            } else {
+            currCollateralOfUser = toInt256(userColl) + PnL;
+            }
+        } else {
+        currCollateralOfUser = toInt256(userColl) + PnL;
+        }
+        
+        int256 leverage = toInt256(trader.size) / currCollateralOfUser;
+        return leverage.abs();
+    }
 
     function _handleProfitAndLoss(int256 PnL, address sender) internal returns (bool) {
         // int256 PnL = _checkProfitOrLossForUser(sender);     
@@ -408,13 +429,13 @@ contract Protocol is ReentrancyGuard {
     // Calculate borrowing fee
     function _calculateBorrowFee(uint256 size, uint256 openAt) internal view returns (uint256 borrowingFee) {
         uint256 timePassed = block.timestamp - openAt;
-        console.log("Time Passed: %s ", timePassed);
         uint256 holdAmount = (size * LIQUIDITY_THRESHOLD) / HELPER_TO_CALCULATE_PERCENTAGE;
-        console.log("Hold Amount: %s", holdAmount);
         uint256 rate = (BORROWING_RATE_PER_YEAR * PRECISION) / (HELPER_TO_CALCULATE_PERCENTAGE * YEAR_IN_SECONDS); // (15 / 100  * 1e18(divide later)) * (1 * 31536000)  
-        console.log("Rate: %s ", rate);
         borrowingFee = (rate * timePassed * holdAmount) / PRECISION;
-        console.log("borrowingFee %s", borrowingFee);
+        // console.log("Hold Amount: %s", holdAmount);
+        // console.log("Rate: %s ", rate);
+        // console.log("Time Passed: %s ", timePassed);
+        // console.log("borrowingFee %s", borrowingFee);
         return borrowingFee;
         // return 0;
     }
@@ -654,8 +675,13 @@ contract Protocol is ReentrancyGuard {
       return _checkLeverageFactor(sender, _size);
     }
 
-    // Calculate the borrowing fee for test
-    function calculateBorrowFee(uint256 size, uint256 openAt) public view returns (uint256 borrowingFee) {
-    return _calculateBorrowFee (size, openAt);
-    }
+    // // Calculate the borrowing fee for test
+    // function calculateBorrowFee(uint256 size, uint256 openAt) public view returns (uint256 borrowingFee) {
+    // return _calculateBorrowFee (size, openAt);
+    // }
+
+    // check leverage of position 
+    function checkLeverageOfPosition(address sender) public view returns (uint256) {
+        return _checkLeverageOfPosition(sender);
+    } 
 }

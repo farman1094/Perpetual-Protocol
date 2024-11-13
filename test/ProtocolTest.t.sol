@@ -36,20 +36,44 @@ contract ProtocolTest is Test {
     }
 
 
-    function testBorrowingFees() public view {
-        uint256 time = block.timestamp ;
-        console.log("time", time);
-        uint256 borrowingFee = protocol.calculateBorrowFee(10000 ether, 0);
-        console.log("borrowingFee", borrowingFee);
+    function testBorrowingFees() public  {
+        // uint256 time = block.timestamp ;
+        // console.log("time", time);
+        // uint256 borrowingFee = protocol.calculateBorrowFee(10000 ether, 0);
+        // console.log("borrowingFee", borrowingFee);
 
-        // testForLiquidityResreves();
-        // vm.startPrank(msg.sender);
-        // token.mint();
 
-        // token.approve(address(protocol), 100 ether);
-        // protocol.depositCollateral(100 ether);
-        // protocol.openPosition(1000 ether, false);
 
+
+        testForLiquidityResreves();
+        vm.startPrank(msg.sender);
+        token.mint();
+
+        token.approve(address(protocol), 5000 ether);
+        protocol.depositCollateral(5000 ether);
+        protocol.openPosition(60000 ether, false);
+        uint leverage = protocol.checkLeverageOfPosition(msg.sender);
+        console.log("leverage", leverage);
+        assert(leverage == 12);
+
+        int256 updateAnswer = 45000e8;
+        feed.updateAnswer(updateAnswer);
+        uint leverage1 = protocol.checkLeverageOfPosition(msg.sender);
+        console.log("leverage", leverage1);
+
+        feed.updateAnswer(65000e8);
+        uint leverage2 = protocol.checkLeverageOfPosition(msg.sender);
+        console.log("leverage", leverage2);
+        
+        feed.updateAnswer(87000e8);
+        uint leverage3 = protocol.checkLeverageOfPosition(msg.sender);
+        console.log("leverage", leverage3);
+        
+        assert(leverage2 == leverage3);
+
+
+
+        
 
         // (uint256 remainingSize,uint256 numOfToken) = protocol.decreasePostion(900 ether);
         // uint256 size = 789545484 ether;

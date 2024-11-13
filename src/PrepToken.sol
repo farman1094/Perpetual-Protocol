@@ -15,6 +15,6 @@ contract PrepToken is ERC20 {
      * @dev Limit of minting only mint 5 ether in a day
      */
     function mint() external {
-        _mint(msg.sender, 100 ether);
+        _mint(msg.sender, 5000 ether);
     }
 }
