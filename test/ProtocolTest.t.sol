@@ -52,29 +52,44 @@ contract ProtocolTest is Test {
         token.approve(address(protocol), 5000 ether);
         protocol.depositCollateral(5000 ether);
         protocol.openPosition(60000 ether, false);
-        uint leverage = protocol.checkLeverageOfPosition(msg.sender);
+        uint256 id = protocol.getIdByAddress(msg.sender);
+        (uint leverage, bool isLiquidabale) = protocol.checkLiquidablePosition(id);
         console.log("leverage", leverage);
         assert(leverage == 12);
+        assert(isLiquidabale == false);
 
         int256 updateAnswer = 45000e8;
         feed.updateAnswer(updateAnswer);
-        uint leverage1 = protocol.checkLeverageOfPosition(msg.sender);
+        (uint leverage1, bool isLiquidabale1) = protocol.checkLiquidablePosition(id);
         console.log("leverage", leverage1);
+        assert(isLiquidabale1 == false);
 
         feed.updateAnswer(65000e8);
-        uint leverage2 = protocol.checkLeverageOfPosition(msg.sender);
+        (uint leverage2, bool isLiquidabale2) = protocol.checkLiquidablePosition(id);
+        assert(isLiquidabale2 == true);
         console.log("leverage", leverage2);
         
         feed.updateAnswer(87000e8);
-        uint leverage3 = protocol.checkLeverageOfPosition(msg.sender);
+        (uint leverage3, bool isLiquidabale3) = protocol.checkLiquidablePosition(id);
         console.log("leverage", leverage3);
         
+        assert(isLiquidabale3 == true);
         assert(leverage2 == leverage3);
 
 
+        feed.updateAnswer(63000e8);
+        (uint leverage4, bool isLiquidabale4) = protocol.checkLiquidablePosition(id);
+        console.log("leverage", leverage4);
+        
+        assert(isLiquidabale4 == true);
+
 
         
 
+        // uint reward = protocol._calculateLiquidableReward(10000e18);
+        // assert(reward == 50e18);
+        // uint reward2 = protocol._calculateLiquidableReward(999e18);
+        // console.log("reward", reward2);
         // (uint256 remainingSize,uint256 numOfToken) = protocol.decreasePostion(900 ether);
         // uint256 size = 789545484 ether;
         // uint256 token1 = protocol.getNumOfTokenByAmount(size);

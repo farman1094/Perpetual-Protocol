@@ -27,12 +27,12 @@ contract Protocol is ReentrancyGuard {
     error Protocol__RedeemOrFeeTransferFailed();    
     error Protocol__PnLNotHandled();
     error Protocol__DepositFailed();
-    // error Protocol__RedeemFailed();
+    error Protocol__IdNotExistToCheckLiquidabalePosition();
     error Protocol__LiquidationFailed();
     error Protocol__LeverageLimitReached();
     error Protocol__UserNotHaveEnoughBalance();
     error Protocol__CannotWithdrawWithOpenPosition();
-    error Protocol__OpenPositionFirst();
+    error Protocol__OpenPositionRequired();
     error Protocol__AlreadyUpdated();
     error Protocol__OnlyAdminCanUpdate();
     error Protocol__TokenValueIsMoreThanSize();
@@ -40,7 +40,7 @@ contract Protocol is ReentrancyGuard {
     error Protocol__CannotIncreaseSizeInLoss__FirstSettleTheExistDues();
     error Protocol__UserCanOnlyHaveOnePositionOpened();
     error Protocol__PositionClosingFailed();
-    // error Protocol__FeeTransferFailed();
+    error Protocol__PositionIsNotLiquidable();
 
     using SignedMath for int256;
     using OracleLib for AggregatorV3Interface;
@@ -75,6 +75,7 @@ contract Protocol is ReentrancyGuard {
     uint256[] private s_availableIdsToUse;
 
     uint256 constant LEVERAGE_RATE = 15; // Leverage rate if 10$ can open the position for $150
+    uint256 constant LIQUIDABALE_LEVERAGE_RATE = 30; // after 30x position is liquidabale
     uint256 constant LIQUIDITY_THRESHOLD = 15; // if total supply is 100, lp's have to keep 15% in the pool any loses (15+lose) (15 - profit)
     uint256 constant LIQUIDATION_REWARD_BASIS = 50; // 50 / 10,000 (0.5%) of liquidable position
     uint256 constant TOTAL_BASIS_POINT_HELPER = 10000; // to get the percentage
@@ -95,6 +96,7 @@ contract Protocol is ReentrancyGuard {
     mapping(address => Position) positions;
     mapping(uint256 => Position) positionsById;
     mapping(address => uint256) s_collateralOfUser;
+    mapping(uint256 => address) s_AddressById;
     // address constant token = 0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43; // Price Feed adress for token/USD
 
     LongPosition public longPosition;
@@ -143,7 +145,7 @@ contract Protocol is ReentrancyGuard {
     function increasePosition(uint256 _size) external moreThanZero(_size) {
         // Position memory UserPosition = positions[msg.sender];
         if (positions[msg.sender].isInitialized == false) {
-            revert Protocol__OpenPositionFirst();
+            revert Protocol__OpenPositionRequired();
         }
         int256 PnL = _checkProfitOrLossForUser(msg.sender);
         if (PnL < 0) revert Protocol__CannotIncreaseSizeInLoss__FirstSettleTheExistDues();
@@ -165,51 +167,21 @@ contract Protocol is ReentrancyGuard {
 
     /** @param sizeToDec is the size need to increase should be in 18 dec */
     function decreasePostion(uint256 sizeToDec) external moreThanZero(sizeToDec) {
-        Position memory userToDec = positions[msg.sender];
-        if (userToDec.isInitialized == false) {
-            revert Protocol__OpenPositionFirst();
+        if (positions[msg.sender].isInitialized == false) {
+            revert Protocol__OpenPositionRequired();
         }
-        if(userToDec.size <= sizeToDec) {
+        if(positions[msg.sender].size <= sizeToDec) {
             revert Protocol__CannotDecreaseSizeMoreThanPosition();
         }
-        uint256 priceOfPurchase = _getPriceOfPurchase(msg.sender);
-        uint256 remainingSize = userToDec.size - sizeToDec;
-        uint256 numOfRemainingToken = (remainingSize * PRECISION) / priceOfPurchase;
-
-        //send amount to vault pending
-        uint256 borrowingFee = _calculateBorrowFee(userToDec.size, userToDec.openAt); // paid fees till now
-        s_collateralOfUser[msg.sender] -= borrowingFee; // we have taken a borrowing fee till now
-        _redeemCollateral(address(vault), borrowingFee);
-       
-
-       
-        // need to handle PnL here
-       bool requireSuccess = _handleProfitAndLossWhileDecreasing(sizeToDec, msg.sender);
-       if(!requireSuccess) revert Protocol__PnLNotHandled();
-        
-        // Deduct Collateral
-       
-
-        // correct accounting
-        positions[msg.sender].size = remainingSize;
-        positions[msg.sender].sizeOfToken = numOfRemainingToken;
-        positions[msg.sender].openAt = block.timestamp; // time reset according to new size (old size till now fees taken)
-        positionsById[userToDec.id] = positions[msg.sender];
-
-        updateTotalAccountingForDecreasing(userToDec.isLong, sizeToDec, (userToDec.sizeOfToken - numOfRemainingToken));
-
-     
+        _decreasePosition(msg.sender, sizeToDec);     
     }
 
     /**
      * NOTE You can open position with collateral at 15% leverage rate
-
      * @param _size the borrowing amount or position,
-   
      * @param _isLong (send true for long, false for short)
-     */
-
      // removing sizeOfToken it affecting other functionalities and not needed because we have only one token to trade on
+     */
     function openPosition(uint256 _size, bool _isLong) external moreThanZero(_size) {
         if (positions[msg.sender].isInitialized) {
             revert Protocol__UserCanOnlyHaveOnePositionOpened();
@@ -230,36 +202,16 @@ contract Protocol is ReentrancyGuard {
         } else {
             _id = s_numOfOpenPositions;
         }
-
-
-        // if (_sizeOfToken == 0) {
-        // } else {
-        //     uint256 valueofToken = (_sizeOfToken * _getPriceOfBtc()) / PRECISION; // as we takin size in 18 decimals
-        //     if (_size < valueofToken) revert Protocol__TokenValueIsMoreThanSize();
-        //     numOfToken = _sizeOfToken;
-        // }
         uint256 numOfToken = _getNumOfTokenByAmount(_size);
 
-
-        // if (_isLong) {
-            // position for long
-            positions[msg.sender] = Position({id: _id, size: _size, sizeOfToken: numOfToken, openAt: block.timestamp, isLong: _isLong, isInitialized: true});
-            positionsById[_id] = positions[msg.sender];
-        // } else {
-        //     //position for short
-        //     positions[msg.sender] = Position({id: s_numOfOpenPositions, size: _size, sizeOfToken: numOfToken, openAt: block.timestamp, isLong: false, isInitialized: true});
-        //     positionsById[s_numOfOpenPositions] = Position({id: s_numOfOpenPositions, size: _size, sizeOfToken: numOfToken, openAt: block.timestamp, isLong: false, isInitialized: true});
-        // }
+        positions[msg.sender] = Position({id: _id, size: _size, sizeOfToken: numOfToken, openAt: block.timestamp, isLong: _isLong, isInitialized: true});
+        positionsById[_id] = positions[msg.sender];
+        s_AddressById[_id] = msg.sender;
         emit PositionOpened(msg.sender, _size);
 
         // get the total of short or long;
-
         updateTotalAccountingForAdding(_isLong, _size, numOfToken);
-        // if (positions[msg.sender].isLong) {
-        //     _increaseTotalLongPosition(_size, numOfToken);
-        // } else {
-        //     _increaseTotalShortPosition(_size, numOfToken);
-        // }
+ 
     }
 
     // Function to close the position and clear the dues, For both Profit and loss cases.
@@ -267,7 +219,7 @@ contract Protocol is ReentrancyGuard {
     function closePosition() external {
         Position memory userToClose = positions[msg.sender];
         if (userToClose.isInitialized == false) {
-            revert Protocol__OpenPositionFirst();
+            revert Protocol__OpenPositionRequired();
         }
 
         int256 PnL = _checkProfitOrLossForUser(msg.sender);
@@ -367,15 +319,100 @@ contract Protocol is ReentrancyGuard {
         return amountToHold;
     }
 
+    // this function will liquidate position if position has more than 30x leverage,
+    // and reward 0.5% of liquidable position to the liquidator. if Collateral have the money to pay the reward, otherwise 
+    // it will pay the reward from the collateral and the remaining amount will be paid by the protocol. because it helps protocol to
+    // keep the system stable.
+
+    // In liquidation we will decrease the position to 2/3 of the original size after taking (borrowingFee, PnL and liquidationReward) rest given to traders
+    function liquidatePosition(uint256 _id) public {
+        (, bool isLiquidabale) = checkLiquidablePosition(_id);
+        if(!isLiquidabale) revert Protocol__PositionIsNotLiquidable();
+        address liquidabaleAddr = s_AddressById[_id];
+        uint256 reward = _calculateLiquidableReward(positions[liquidabaleAddr].size);  
+        uint256  sizeToDec = (positions[liquidabaleAddr].size * 2) / 3;
+        _decreasePosition(liquidabaleAddr, sizeToDec);
+        uint256 remainingBalOfTraderGotLiquidated = s_collateralOfUser[liquidabaleAddr];
+
+       if(remainingBalOfTraderGotLiquidated >= reward) {
+              s_collateralOfUser[liquidabaleAddr] -= reward;
+              s_collateralOfUser[msg.sender] += reward;
+         } else {
+            s_collateralOfUser[msg.sender] += reward;
+            s_collateralOfUser[liquidabaleAddr] -= remainingBalOfTraderGotLiquidated;
+            uint256 remainingReward = reward - remainingBalOfTraderGotLiquidated;
+            bool success = IERC20(i_acceptedCollateral).transferFrom(address(vault), address(this), remainingReward);
+            require(success, "Liquidation reward Transfer failed");
+       }
+       (,bool isLiquidabaleAfterLiquidationOnce) = checkLiquidablePosition(_id);
+        if(isLiquidabaleAfterLiquidationOnce) {
+            uint256 sizeToDecAgain = (positions[liquidabaleAddr].size * 2) / 3;
+            _decreasePosition(liquidabaleAddr, sizeToDecAgain);
+        }
+
+       (,bool isLiquidabaleAfterLiquidationSecond) = checkLiquidablePosition(_id);
+       if(isLiquidabaleAfterLiquidationSecond){
+              revert Protocol__LiquidationFailed();
+       }
+    }
+
+
+      // check leverage of position and return bool(true) if position is liquidabale
+    function checkLiquidablePosition(uint256 _id) public view returns (uint256 leverageRate, bool isLiquidabale) {
+        address sender = s_AddressById[_id];
+        // @note confirm if required
+        if(sender == address(0)) {
+            revert Protocol__IdNotExistToCheckLiquidabalePosition();
+        }   
+         if (positions[sender].isInitialized == false) { //confirm if really required
+            revert Protocol__OpenPositionRequired();
+        }     
+        leverageRate = _checkLiquidablePosition(sender);
+        isLiquidabale = leverageRate >= LIQUIDABALE_LEVERAGE_RATE ? true : false;
+        return (leverageRate , isLiquidabale);
+    }
+
     //////////////////////////
     // Internals Functions
     //////////////////////////
+
+    // function to decrease the positions and handle the PnL
+    function _decreasePosition(address traderToDec, uint256 sizeToDec) internal {
+        Position memory userToDec = positions[traderToDec];
+
+        uint256 priceOfPurchase = _getPriceOfPurchase(traderToDec);
+        uint256 remainingSize = userToDec.size - sizeToDec;
+        uint256 numOfRemainingToken = (remainingSize * PRECISION) / priceOfPurchase;
+
+        //send amount to vault pending
+        uint256 borrowingFee = _calculateBorrowFee(userToDec.size, userToDec.openAt); // paid fees till now
+        s_collateralOfUser[traderToDec] -= borrowingFee; // we have taken a borrowing fee till now
+        _redeemCollateral(address(vault), borrowingFee);
+       
+       // need to handle PnL here
+       bool requireSuccess = _handleProfitAndLossWhileDecreasing(sizeToDec, traderToDec);
+       if(!requireSuccess) revert Protocol__PnLNotHandled();     
+
+        // correct accounting
+        positions[traderToDec].size = remainingSize;
+        positions[traderToDec].sizeOfToken = numOfRemainingToken;
+        positions[traderToDec].openAt = block.timestamp; // time reset according to new size (old size till now fees taken)
+        positionsById[userToDec.id] = positions[traderToDec];
+
+        updateTotalAccountingForDecreasing(userToDec.isLong, sizeToDec, (userToDec.sizeOfToken - numOfRemainingToken));
+    }
+
+
+    // function to calcualate liquidate rewards
+      function _calculateLiquidableReward(uint256 size) internal pure returns(uint256) {
+            return (size * LIQUIDATION_REWARD_BASIS) / TOTAL_BASIS_POINT_HELPER;
+         }
 
 
     // function to send amount to vault call !
     // function _sendAmountToVault(address from, uint256 amountToTransfer) internal returns (bool) {}
 
-    function _checkLeverageOfPosition(address sender) public view returns (uint256) {
+    function _checkLiquidablePosition(address sender) internal view returns (uint256) {
         Position memory trader = positions[sender];
         int256 PnL = _checkProfitOrLossForUser(sender);
         uint256 userColl = s_collateralOfUser[sender];
@@ -399,7 +436,8 @@ contract Protocol is ReentrancyGuard {
         if (PnL > 0) {
             uint256 profit = PnL.abs(); // convert int to uint256
             s_collateralOfUser[sender] += profit;
-            IERC20(i_acceptedCollateral).transferFrom(address(vault), address(this), profit);
+            bool success = IERC20(i_acceptedCollateral).transferFrom(address(vault), address(this), profit);
+            require(success, "Profit Transfer failed");
         } else if (PnL < 0) {
             uint256 loss = PnL.abs();
             _closePositionInLoss(sender, loss);
@@ -604,6 +642,7 @@ contract Protocol is ReentrancyGuard {
     //  If users doesn't have open position it will return 0
     /** @dev need to check */
     function checkProfitOrLossForUser(address _user) public view returns (int256 PnL) {
+        
         Position memory userToClose = positions[_user];
         if (userToClose.isInitialized == false) {
             // revert Protocol__OpenPositionFirst(); // View function should not revert
@@ -676,12 +715,15 @@ contract Protocol is ReentrancyGuard {
     }
 
     // // Calculate the borrowing fee for test
-    // function calculateBorrowFee(uint256 size, uint256 openAt) public view returns (uint256 borrowingFee) {
-    // return _calculateBorrowFee (size, openAt);
-    // }
+    function getIdByAddress(address sender) public view returns (uint256 id) {
+        if(positions[sender].isInitialized == false) {
+            return 0;
+        }
+        return positions[sender].id;
+    }
 
-    // check leverage of position 
-    function checkLeverageOfPosition(address sender) public view returns (uint256) {
-        return _checkLeverageOfPosition(sender);
-    } 
+   
 }
+
+
+     
