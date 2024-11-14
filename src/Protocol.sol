@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {IVault} from "src/interface/IVault.sol";
+
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {SignedMath} from "@openzeppelin/contracts/utils/math/SignedMath.sol";
+
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {OracleLib} from "./libraries/OracleLib.sol";
-import {console} from "forge-std/console.sol";
 
-import {Vault} from "src/Vault.sol";
+import {console} from "forge-std/console.sol"; //(to be deleted)
 
 /**
  * @title PrepProtocol
@@ -37,7 +39,7 @@ contract Protocol is ReentrancyGuard {
     error Protocol__OnlyAdminCanUpdate();
     error Protocol__TokenValueIsMoreThanSize();
     error Protocol__CollateralReserveIsNotAvailable();
-    error Protocol__CannotIncreaseSizeInLoss__FirstSettleTheExistDues();
+    error Protocol__CannotChangeSizeInLoss__FirstSettleTheExistDues();
     error Protocol__UserCanOnlyHaveOnePositionOpened();
     error Protocol__PositionClosingFailed();
     error Protocol__PositionIsNotLiquidable();
@@ -70,7 +72,7 @@ contract Protocol is ReentrancyGuard {
     //////////////////////////
     // State variables
     //////////////////////////
-    Vault private vault;
+    IVault private vault;
     uint256 private s_numOfOpenPositions;
     uint256[] private s_availableIdsToUse;
 
@@ -129,7 +131,7 @@ contract Protocol is ReentrancyGuard {
     function updateVaultAddress(address _vaultAddress) external {
         if (alreadyUpdated) revert Protocol__AlreadyUpdated();
         if (msg.sender != i_ADMIN) revert Protocol__OnlyAdminCanUpdate();
-        vault = Vault(_vaultAddress);
+        vault = IVault(_vaultAddress);
         alreadyUpdated = true;
     }
 
@@ -141,14 +143,17 @@ contract Protocol is ReentrancyGuard {
         if (!success) revert Protocol__DepositFailed();
     }
 
-    // Note only Open position size can be increased and traders in loss cannot increase positions
-    function increasePosition(uint256 _size) external moreThanZero(_size) {
+    // Note Any trader can increase the position with the collateral he has, only requeirement is to have the realTime leverage under 15x even with the new size
+    function increasePosition(uint256 _size) external moreThanZero(_size) nonReentrant{
         // Position memory UserPosition = positions[msg.sender];
         if (positions[msg.sender].isInitialized == false) {
             revert Protocol__OpenPositionRequired();
         }
-        int256 PnL = _checkProfitOrLossForUser(msg.sender);
-        if (PnL < 0) revert Protocol__CannotIncreaseSizeInLoss__FirstSettleTheExistDues();
+        (uint256 leverageRate ,) = checkPositionLeverageAndLiquidability(positions[msg.sender].id);
+        console.log("leverageRate", leverageRate);
+        if(leverageRate >= LEVERAGE_RATE) {         // checking leverage is under 15 before as well to be so the gas fee will not be wasted
+            revert Protocol__LeverageLimitReached();
+        }
         bool eligible = _checkLeverageFactor(msg.sender, _size);
         if (!eligible) revert Protocol__LeverageLimitReached();
         uint256 numOfToken = _getNumOfTokenByAmount(_size);
@@ -157,11 +162,14 @@ contract Protocol is ReentrancyGuard {
         positionsById[positions[msg.sender].id] = positions[msg.sender];
         emit PositionOpened(msg.sender, _size); 
         updateTotalAccountingForAdding(positions[msg.sender].isLong, _size, numOfToken);
-        // if (positions[msg.sender].isLong) {
-        //     _increaseTotalLongPosition(_size, numOfToken);
-        // } else {
-        //     _increaseTotalShortPosition(_size, numOfToken);
-        // }
+
+        (uint256 leverageRateAfterIncrease,) = checkPositionLeverageAndLiquidability(positions[msg.sender].id);
+        console.log("leverageRateAfterIncrease", leverageRateAfterIncrease);
+        // checking leverage is under 15 afterincreasing the size
+        if(leverageRateAfterIncrease >= LEVERAGE_RATE) {
+            revert Protocol__LeverageLimitReached();
+        }
+    
     }
 
 
@@ -173,6 +181,7 @@ contract Protocol is ReentrancyGuard {
         if(positions[msg.sender].size <= sizeToDec) {
             revert Protocol__CannotDecreaseSizeMoreThanPosition();
         }
+       
         _decreasePosition(msg.sender, sizeToDec);     
     }
 
@@ -241,25 +250,8 @@ contract Protocol is ReentrancyGuard {
 
        bool requireSuccess = _handleProfitAndLoss(PnL, msg.sender);
         if (!requireSuccess) revert Protocol__PnLNotHandled();
-        // if (PnL > 0) {
-        //     uint256 profit = PnL.abs(); // convert int to uint256
-        //     s_collateralOfUser[msg.sender] += profit;
-        //     IERC20(i_acceptedCollateral).transferFrom(address(vault), address(this), profit);
-        // } else if (PnL < 0) {
-        //     uint256 loss = PnL.abs();
-        //     bool success = _closePositionInLoss(msg.sender, loss);
-        //     if (!success) revert Protocol__PositionClosingFailed();
-        // }
 
         updateTotalAccountingForDecreasing(userToClose.isLong, userToClose.size, userToClose.sizeOfToken);
-
-        // if (userToClose.isLong) {
-        //     longPosition.totalSize -= userToClose.size;
-        //     longPosition.totalSizeOfToken -= userToClose.sizeOfToken;
-        // } else {
-        //     shortPosition.totalSize -= userToClose.size;
-        //     shortPosition.totalSizeOfToken -= userToClose.sizeOfToken;
-        // }
     }
 
     /**
@@ -325,8 +317,8 @@ contract Protocol is ReentrancyGuard {
     // keep the system stable.
 
     // In liquidation we will decrease the position to 2/3 of the original size after taking (borrowingFee, PnL and liquidationReward) rest given to traders
-    function liquidatePosition(uint256 _id) public {
-        (, bool isLiquidabale) = checkLiquidablePosition(_id);
+    function liquidatePosition(uint256 _id) public nonReentrant{
+        (, bool isLiquidabale) = checkPositionLeverageAndLiquidability(_id);
         if(!isLiquidabale) revert Protocol__PositionIsNotLiquidable();
         address liquidabaleAddr = s_AddressById[_id];
         uint256 reward = _calculateLiquidableReward(positions[liquidabaleAddr].size);  
@@ -344,21 +336,20 @@ contract Protocol is ReentrancyGuard {
             bool success = IERC20(i_acceptedCollateral).transferFrom(address(vault), address(this), remainingReward);
             require(success, "Liquidation reward Transfer failed");
        }
-       (,bool isLiquidabaleAfterLiquidationOnce) = checkLiquidablePosition(_id);
+       (,bool isLiquidabaleAfterLiquidationOnce) = checkPositionLeverageAndLiquidability(_id);
         if(isLiquidabaleAfterLiquidationOnce) {
             uint256 sizeToDecAgain = (positions[liquidabaleAddr].size * 2) / 3;
             _decreasePosition(liquidabaleAddr, sizeToDecAgain);
+            (,bool isLiquidabaleAfterLiquidationSecond) = checkPositionLeverageAndLiquidability(_id);
+            if(isLiquidabaleAfterLiquidationSecond){
+                  revert Protocol__LiquidationFailed();
+             }
         }
-
-       (,bool isLiquidabaleAfterLiquidationSecond) = checkLiquidablePosition(_id);
-       if(isLiquidabaleAfterLiquidationSecond){
-              revert Protocol__LiquidationFailed();
-       }
     }
 
 
       // check leverage of position and return bool(true) if position is liquidabale
-    function checkLiquidablePosition(uint256 _id) public view returns (uint256 leverageRate, bool isLiquidabale) {
+    function checkPositionLeverageAndLiquidability(uint256 _id) public view returns (uint256 leverageRate, bool isLiquidabale) {
         address sender = s_AddressById[_id];
         // @note confirm if required
         if(sender == address(0)) {
@@ -381,11 +372,13 @@ contract Protocol is ReentrancyGuard {
         Position memory userToDec = positions[traderToDec];
 
         uint256 priceOfPurchase = _getPriceOfPurchase(traderToDec);
+        console.log("priceOfPurchase", priceOfPurchase);
         uint256 remainingSize = userToDec.size - sizeToDec;
         uint256 numOfRemainingToken = (remainingSize * PRECISION) / priceOfPurchase;
 
         //send amount to vault pending
         uint256 borrowingFee = _calculateBorrowFee(userToDec.size, userToDec.openAt); // paid fees till now
+        console.log("borrowingFee", borrowingFee);
         s_collateralOfUser[traderToDec] -= borrowingFee; // we have taken a borrowing fee till now
         _redeemCollateral(address(vault), borrowingFee);
        
@@ -415,6 +408,7 @@ contract Protocol is ReentrancyGuard {
     function _checkLiquidablePosition(address sender) internal view returns (uint256) {
         Position memory trader = positions[sender];
         int256 PnL = _checkProfitOrLossForUser(sender);
+        console.log("PnL of _checkLiquidablePosition", PnL);
         uint256 userColl = s_collateralOfUser[sender];
         int256 currCollateralOfUser;
         if(PnL < 0){
@@ -433,6 +427,8 @@ contract Protocol is ReentrancyGuard {
 
     function _handleProfitAndLoss(int256 PnL, address sender) internal returns (bool) {
         // int256 PnL = _checkProfitOrLossForUser(sender);     
+        console.log("PnL", PnL);
+
         if (PnL > 0) {
             uint256 profit = PnL.abs(); // convert int to uint256
             s_collateralOfUser[sender] += profit;
@@ -467,13 +463,14 @@ contract Protocol is ReentrancyGuard {
     // Calculate borrowing fee
     function _calculateBorrowFee(uint256 size, uint256 openAt) internal view returns (uint256 borrowingFee) {
         uint256 timePassed = block.timestamp - openAt;
+        console.log("timePassed",timePassed);
         uint256 holdAmount = (size * LIQUIDITY_THRESHOLD) / HELPER_TO_CALCULATE_PERCENTAGE;
         uint256 rate = (BORROWING_RATE_PER_YEAR * PRECISION) / (HELPER_TO_CALCULATE_PERCENTAGE * YEAR_IN_SECONDS); // (15 / 100  * 1e18(divide later)) * (1 * 31536000)  
         borrowingFee = (rate * timePassed * holdAmount) / PRECISION;
-        // console.log("Hold Amount: %s", holdAmount);
-        // console.log("Rate: %s ", rate);
-        // console.log("Time Passed: %s ", timePassed);
-        // console.log("borrowingFee %s", borrowingFee);
+        console.log("Hold Amount: %s", holdAmount);
+        console.log("Rate: %s ", rate);
+        console.log("Time Passed: %s ", timePassed);
+        console.log("borrowingFee %s", borrowingFee);
         return borrowingFee;
         // return 0;
     }

@@ -35,16 +35,31 @@ contract ProtocolTest is Test {
         vm.stopBroadcast();
     }
 
+    function testDecreasePositiRevertDueToHighLeverage() public {
+        giveLiquidity();
+
+        vm.startPrank(msg.sender);
+        token.mint();
+
+        token.approve(address(protocol), 5000 ether);
+        protocol.depositCollateral(5000 ether);
+        protocol.openPosition(60000 ether, true);
+        feed.updateAnswer(54000e8);
+        
+        vm.warp(block.timestamp + 31536000); // Fast forward 1 hour
+
+        console.log("balance BEfore decrese %e:", protocol.getCollateralBalance());
+
+        console.log("balance After decrese %e:", protocol.getCollateralBalance());
+    }
+
+
 
     function testBorrowingFees() public  {
         // uint256 time = block.timestamp ;
         // console.log("time", time);
         // uint256 borrowingFee = protocol.calculateBorrowFee(10000 ether, 0);
         // console.log("borrowingFee", borrowingFee);
-
-
-
-
         testForLiquidityResreves();
         vm.startPrank(msg.sender);
         token.mint();
@@ -53,24 +68,24 @@ contract ProtocolTest is Test {
         protocol.depositCollateral(5000 ether);
         protocol.openPosition(60000 ether, false);
         uint256 id = protocol.getIdByAddress(msg.sender);
-        (uint leverage, bool isLiquidabale) = protocol.checkLiquidablePosition(id);
+        (uint leverage, bool isLiquidabale) = protocol.checkPositionLeverageAndLiquidability(id);
         console.log("leverage", leverage);
         assert(leverage == 12);
         assert(isLiquidabale == false);
 
         int256 updateAnswer = 45000e8;
         feed.updateAnswer(updateAnswer);
-        (uint leverage1, bool isLiquidabale1) = protocol.checkLiquidablePosition(id);
+        (uint leverage1, bool isLiquidabale1) = protocol.checkPositionLeverageAndLiquidability(id);
         console.log("leverage", leverage1);
         assert(isLiquidabale1 == false);
 
         feed.updateAnswer(65000e8);
-        (uint leverage2, bool isLiquidabale2) = protocol.checkLiquidablePosition(id);
+        (uint leverage2, bool isLiquidabale2) = protocol.checkPositionLeverageAndLiquidability(id);
         assert(isLiquidabale2 == true);
         console.log("leverage", leverage2);
         
         feed.updateAnswer(87000e8);
-        (uint leverage3, bool isLiquidabale3) = protocol.checkLiquidablePosition(id);
+        (uint leverage3, bool isLiquidabale3) = protocol.checkPositionLeverageAndLiquidability(id);
         console.log("leverage", leverage3);
         
         assert(isLiquidabale3 == true);
@@ -78,7 +93,7 @@ contract ProtocolTest is Test {
 
 
         feed.updateAnswer(63000e8);
-        (uint leverage4, bool isLiquidabale4) = protocol.checkLiquidablePosition(id);
+        (uint leverage4, bool isLiquidabale4) = protocol.checkPositionLeverageAndLiquidability(id);
         console.log("leverage", leverage4);
         
         assert(isLiquidabale4 == true);
@@ -101,7 +116,7 @@ contract ProtocolTest is Test {
     }
 
 
-    function testCheckBasicMath() public {
+    function testToCheckIncreasePosition() public {
         address vaultAddr = protocol.getVaultAddress();
         assert(vaultAddr == address(vault));
         testForLiquidityResreves();
@@ -112,11 +127,15 @@ contract ProtocolTest is Test {
         protocol.depositCollateral(100 ether);
 
         protocol.openPosition(1000 ether, false);
+        (uint256 sizeBefore,uint a,,) = protocol.getPositionDetails(msg.sender);
+        assert (sizeBefore == 1000 ether);
+    // @audit issue in this re cheeck it by console where the profit comes from without update in price
+
         console.log("1st Position---------------------------------------");
         protocol.increasePosition(500 ether);
-        uint256 totalSize = protocol.getNumOfOpenPositions();
+        (uint256 size, uint256 sizeOfToken, bool isLong, bool isInitialized) = protocol.getPositionDetails(msg.sender);
+        assert (size == 1500 ether);
         // protocol.liquidityReservesToHold();
-        console.log("totalSize", totalSize);
         // vm.expectRevert();
         // protocol.increasePosition(600 ether);
     }
@@ -239,22 +258,6 @@ contract ProtocolTest is Test {
         assert(num == 0);
     }
 
-    function testCannotIncreaseInLoss() public {
-        testForLiquidityResreves();
-        vm.startPrank(msg.sender);
-        token.mint();
-        token.approve(address(protocol), 100 ether);
-        protocol.depositCollateral(100 ether);
-        protocol.openPosition(1000 ether, false);
-
-        // Closing Positions -----------------------------------
-        // int256 updateAnswer = 54000e8;
-        // feed.updateAnswer(updateAnswer);
-        int256 PnL = protocol.checkProfitOrLossForUser(msg.sender);
-        console.log("PROFIT", PnL);
-        protocol.increasePosition(500 ether);
-        vm.stopPrank();
-    }
 
     function testDepositCollateralAndOpenPosition() public {
         testForLiquidityResreves();
@@ -308,6 +311,37 @@ contract ProtocolTest is Test {
         protocol.getPriceOfBtc();
         protocol.getNumOfTokenByAmount(1 ether);
         protocol.checkLeverageFactor(msg.sender, 100);
+    }
+
+    function giveLiquidity() internal  {
+        vm.startPrank(user);
+        token.mint();
+        token.approve(address(vault), token.balanceOf(user));
+        vault.deposit(5000 ether, user);
+        vm.stopPrank();
+
+        // vm.startPrank(user2);
+        // token.mint();
+        // token.approve(address(vault), token.balanceOf(user2));
+        // vault.deposit(5000 ether, user2);
+        // assert(vault.balanceOf(user) == vault.balanceOf(user2));
+        // vm.stopPrank();
+
+        // vm.startPrank(user3);
+        // token.mint();
+        // token.approve(address(vault), token.balanceOf(user3));
+        // vault.deposit(5000 ether, user3);
+        // assert(vault.balanceOf(user3) == vault.balanceOf(user2));
+        // assert(token.balanceOf(address(vault)) == 15000 ether);
+        // vm.stopPrank();
+
+        // vm.startPrank(user4);
+        // token.mint();
+        // token.approve(address(vault), token.balanceOf(user4));
+        // vault.deposit(5000 ether, user4);
+        // assert(vault.balanceOf(user3) == vault.balanceOf(user4));
+        // assert(token.balanceOf(address(vault)) == 20000 ether);
+        // vm.stopPrank();
     }
 
     //    function testtingERC4626() public view {
