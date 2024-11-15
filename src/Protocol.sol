@@ -24,6 +24,7 @@ contract Protocol is ReentrancyGuard {
     error Protocol__NeedsMoreThanZero();
     error Protocol__FundsNotAvailableForPosition();
     error Protocol__CurrentlyNumberIsZero();
+    error Protocol__TraderCannotLiquidateHimself();
 
     error Protocol__CannotDecreaseSizeMoreThanPosition();
     error Protocol__RedeemOrFeeTransferFailed();    
@@ -76,8 +77,8 @@ contract Protocol is ReentrancyGuard {
     uint256 private s_numOfOpenPositions;
     uint256[] private s_availableIdsToUse;
 
-    uint256 constant LEVERAGE_RATE = 15; // Leverage rate if 10$ can open the position for $150
-    uint256 constant LIQUIDABALE_LEVERAGE_RATE = 30; // after 30x position is liquidabale
+    uint256 constant LEVERAGE_RATE = 15e18; // Leverage rate if 10$ can open the position for $150 (18 decimals for precesion)
+    uint256 constant LIQUIDABALE_LEVERAGE_RATE = 30e18; // after 30x position is liquidabale
     uint256 constant LIQUIDITY_THRESHOLD = 15; // if total supply is 100, lp's have to keep 15% in the pool any loses (15+lose) (15 - profit)
     uint256 constant LIQUIDATION_REWARD_BASIS = 50; // 50 / 10,000 (0.5%) of liquidable position
     uint256 constant TOTAL_BASIS_POINT_HELPER = 10000; // to get the percentage
@@ -154,6 +155,11 @@ contract Protocol is ReentrancyGuard {
         if(leverageRate >= LEVERAGE_RATE) {         // checking leverage is under 15 before as well to be so the gas fee will not be wasted
             revert Protocol__LeverageLimitReached();
         }
+        uint256 borrowingFee = _calculateBorrowFee(positions[msg.sender].size, positions[msg.sender].openAt); // paid fees till now
+        console.log("borrowingFee", borrowingFee);
+        
+        // s_collateralOfUser[traderToDec] -= borrowingFee; // we have taken a borrowing fee till now
+        _handleAmountDeduction(msg.sender, borrowingFee);
         bool eligible = _checkLeverageFactor(msg.sender, _size);
         if (!eligible) revert Protocol__LeverageLimitReached();
         uint256 numOfToken = _getNumOfTokenByAmount(_size);
@@ -226,32 +232,11 @@ contract Protocol is ReentrancyGuard {
     // Function to close the position and clear the dues, For both Profit and loss cases.
 
     function closePosition() external {
-        Position memory userToClose = positions[msg.sender];
-        if (userToClose.isInitialized == false) {
+        if (positions[msg.sender].isInitialized == false) {
             revert Protocol__OpenPositionRequired();
         }
+        _closePosition(msg.sender);
 
-        int256 PnL = _checkProfitOrLossForUser(msg.sender);
-        uint256 borrowingFee = _calculateBorrowFee(userToClose.size, userToClose.openAt);
-        // Update the total Accounting
-        // reset the mapping
-        delete positions[msg.sender]; //confirm the position
-        delete positionsById[userToClose.id];
-
-        // use Id later
-        s_availableIdsToUse.push(userToClose.id);
-        emit PositionClose(msg.sender, userToClose.size);
-
-        // s_numOfOpenPositions--; it would not happen becuase we save the deleted it to use it on the new one
-
-        // Deduct Collateral
-        s_collateralOfUser[msg.sender] -= borrowingFee;
-
-
-       bool requireSuccess = _handleProfitAndLoss(PnL, msg.sender);
-        if (!requireSuccess) revert Protocol__PnLNotHandled();
-
-        updateTotalAccountingForDecreasing(userToClose.isLong, userToClose.size, userToClose.sizeOfToken);
     }
 
     /**
@@ -321,8 +306,11 @@ contract Protocol is ReentrancyGuard {
         (, bool isLiquidabale) = checkPositionLeverageAndLiquidability(_id);
         if(!isLiquidabale) revert Protocol__PositionIsNotLiquidable();
         address liquidabaleAddr = s_AddressById[_id];
+        if(liquidabaleAddr == msg.sender) revert Protocol__TraderCannotLiquidateHimself();
         uint256 reward = _calculateLiquidableReward(positions[liquidabaleAddr].size);  
         uint256  sizeToDec = (positions[liquidabaleAddr].size * 2) / 3;
+        console.log("sizeToDec", sizeToDec);
+        console.log("liquidation reward", reward);
         _decreasePosition(liquidabaleAddr, sizeToDec);
         uint256 remainingBalOfTraderGotLiquidated = s_collateralOfUser[liquidabaleAddr];
 
@@ -336,14 +324,10 @@ contract Protocol is ReentrancyGuard {
             bool success = IERC20(i_acceptedCollateral).transferFrom(address(vault), address(this), remainingReward);
             require(success, "Liquidation reward Transfer failed");
        }
-       (,bool isLiquidabaleAfterLiquidationOnce) = checkPositionLeverageAndLiquidability(_id);
-        if(isLiquidabaleAfterLiquidationOnce) {
-            uint256 sizeToDecAgain = (positions[liquidabaleAddr].size * 2) / 3;
-            _decreasePosition(liquidabaleAddr, sizeToDecAgain);
-            (,bool isLiquidabaleAfterLiquidationSecond) = checkPositionLeverageAndLiquidability(_id);
-            if(isLiquidabaleAfterLiquidationSecond){
-                  revert Protocol__LiquidationFailed();
-             }
+
+        uint256 leverageRate = _checkLiquidablePosition(liquidabaleAddr);
+        if(leverageRate > LEVERAGE_RATE) {
+            _closePosition(liquidabaleAddr);
         }
     }
 
@@ -367,6 +351,49 @@ contract Protocol is ReentrancyGuard {
     // Internals Functions
     //////////////////////////
 
+    // Helper internal function for closing fucntion to use it twice
+        function _closePosition(address traderToClose) internal {
+        Position memory userToClose = positions[msg.sender];
+
+        int256 PnL = _checkProfitOrLossForUser(traderToClose);
+        uint256 borrowingFee = _calculateBorrowFee(userToClose.size, userToClose.openAt);
+        // Update the total Accounting
+        // reset the mapping
+        delete positions[traderToClose]; //confirm the position
+        delete positionsById[userToClose.id];
+
+        // use Id later
+        s_availableIdsToUse.push(userToClose.id);
+        emit PositionClose(traderToClose, userToClose.size);
+
+        // s_numOfOpenPositions--; it would not happen becuase we save the deleted it to use it on the new one
+
+        // Deduct Collateral
+        // s_collateralOfUser[traderToClose] -= borrowingFee;
+        _handleAmountDeduction(traderToClose, borrowingFee);
+
+
+
+       bool requireSuccess = _handleProfitAndLoss(PnL, traderToClose);
+        if (!requireSuccess) revert Protocol__PnLNotHandled();
+        updateTotalAccountingForDecreasing(userToClose.isLong, userToClose.size, userToClose.sizeOfToken);
+}
+
+    // // function to check leverage liquidability after liquidating once 
+    //     function _checkPositionLeverageAndLiquidabilityAfterDecreasing(uint256 _id) internal view returns (uint256 leverageRate, bool isLiquidabale) {
+    //     address sender = s_AddressById[_id]; // checks only done in first time
+    //     // // @note confirm if required
+    //     // if(sender == address(0)) {
+    //     //     revert Protocol__IdNotExistToCheckLiquidabalePosition();
+    //     // }   
+    //     //  if (positions[sender].isInitialized == false) { //confirm if really required
+    //     //     revert Protocol__OpenPositionRequired();
+    //     // }     
+    //     leverageRate = _checkLiquidablePosition(sender);
+    //     isLiquidabale = leverageRate >=  LEVERAGE_RATE ? true : false;
+    //     return (leverageRate , isLiquidabale);
+    // }
+
     // function to decrease the positions and handle the PnL
     function _decreasePosition(address traderToDec, uint256 sizeToDec) internal {
         Position memory userToDec = positions[traderToDec];
@@ -379,8 +406,9 @@ contract Protocol is ReentrancyGuard {
         //send amount to vault pending
         uint256 borrowingFee = _calculateBorrowFee(userToDec.size, userToDec.openAt); // paid fees till now
         console.log("borrowingFee", borrowingFee);
-        s_collateralOfUser[traderToDec] -= borrowingFee; // we have taken a borrowing fee till now
-        _redeemCollateral(address(vault), borrowingFee);
+
+        // s_collateralOfUser[traderToDec] -= borrowingFee; // we have taken a borrowing fee till now
+        _handleAmountDeduction(traderToDec, borrowingFee);
        
        // need to handle PnL here
        bool requireSuccess = _handleProfitAndLossWhileDecreasing(sizeToDec, traderToDec);
@@ -413,7 +441,7 @@ contract Protocol is ReentrancyGuard {
         int256 currCollateralOfUser;
         if(PnL < 0){
             if(PnL.abs() >= userColl) {
-                currCollateralOfUser = 1e18; // 0 is undefined by divind so 1
+                currCollateralOfUser = 1e18; // 0 is undefined by divide so 1
             } else {
             currCollateralOfUser = toInt256(userColl) + PnL;
             }
@@ -421,7 +449,7 @@ contract Protocol is ReentrancyGuard {
         currCollateralOfUser = toInt256(userColl) + PnL;
         }
         
-        int256 leverage = toInt256(trader.size) / currCollateralOfUser;
+        int256 leverage = (toInt256(trader.size) * toInt256(PRECISION)) / currCollateralOfUser;
         return leverage.abs();
     }
 
@@ -436,7 +464,7 @@ contract Protocol is ReentrancyGuard {
             require(success, "Profit Transfer failed");
         } else if (PnL < 0) {
             uint256 loss = PnL.abs();
-            _closePositionInLoss(sender, loss);
+            _handleAmountDeduction(sender, loss);
         }
         return true;
     }
@@ -463,14 +491,14 @@ contract Protocol is ReentrancyGuard {
     // Calculate borrowing fee
     function _calculateBorrowFee(uint256 size, uint256 openAt) internal view returns (uint256 borrowingFee) {
         uint256 timePassed = block.timestamp - openAt;
-        console.log("timePassed",timePassed);
         uint256 holdAmount = (size * LIQUIDITY_THRESHOLD) / HELPER_TO_CALCULATE_PERCENTAGE;
         uint256 rate = (BORROWING_RATE_PER_YEAR * PRECISION) / (HELPER_TO_CALCULATE_PERCENTAGE * YEAR_IN_SECONDS); // (15 / 100  * 1e18(divide later)) * (1 * 31536000)  
         borrowingFee = (rate * timePassed * holdAmount) / PRECISION;
-        console.log("Hold Amount: %s", holdAmount);
-        console.log("Rate: %s ", rate);
-        console.log("Time Passed: %s ", timePassed);
-        console.log("borrowingFee %s", borrowingFee);
+        // console.log("timePassed",timePassed);
+        // console.log("Hold Amount: %s", holdAmount);
+        // console.log("Rate: %s ", rate);
+        // console.log("Time Passed: %s ", timePassed);
+        // console.log("borrowingFee %s", borrowingFee);
         return borrowingFee;
         // return 0;
     }
@@ -534,7 +562,10 @@ contract Protocol is ReentrancyGuard {
     /**
      * @dev This function is called is used in situation of losses, When trader come to close position
      */
-    function _closePositionInLoss(address user, uint256 lossToCover) internal {
+    function _handleAmountDeduction(address user, uint256 lossToCover) internal {
+        if(lossToCover == 0) {
+            return;
+        }
         uint256 userBal = s_collateralOfUser[user];
         uint256 amountToCover;
         //  uint256 amountToCover = userBal >= loss ? loss : s_collateralOfUser[user];
@@ -589,7 +620,7 @@ contract Protocol is ReentrancyGuard {
         if (collateralOfUser == 0) {
             return false;
         }
-        uint256 sizeLimit = collateralOfUser * LEVERAGE_RATE;
+        uint256 sizeLimit = (collateralOfUser * LEVERAGE_RATE) / PRECISION;
         if (sizeLimit >= _size) {
             return true;
         } else {
@@ -601,7 +632,7 @@ contract Protocol is ReentrancyGuard {
     function _checkLeverageFactorForExisting(address sender, uint256 _size) internal view returns (bool) {
         Position memory UserPosition = positions[sender];
         uint256 collateralOfUser = s_collateralOfUser[sender];
-        uint256 sizeLimit = collateralOfUser * LEVERAGE_RATE;
+        uint256 sizeLimit = (collateralOfUser * LEVERAGE_RATE) / PRECISION;
         uint256 sizeAskingFor = _size + UserPosition.size;
         if (sizeLimit >= sizeAskingFor) {
             return true;
@@ -668,13 +699,14 @@ contract Protocol is ReentrancyGuard {
     function getPositionDetails(address user)
         public
         view
-        returns (uint256 size, uint256 sizeOfToken, bool isLong, bool isInitialized)
+        returns (uint256 size, uint256 sizeOfToken,uint256 id, bool isLong, bool isInitialized)
     {
         size = positions[user].size;
         sizeOfToken = positions[user].sizeOfToken;
+        id = positions[user].id;
         isLong = positions[user].isLong;
         isInitialized = positions[user].isInitialized;
-        return (size, sizeOfToken, isLong, isInitialized);
+        return (size, sizeOfToken, id, isLong, isInitialized);
     }
 
     // Get number of Open Positions

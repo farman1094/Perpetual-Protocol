@@ -15,6 +15,9 @@ import {MockERC20} from "test/mocks/MockERC20.sol";
 import {MockPriceFeed} from "test/mocks/MockPriceFeed.sol";
 
 contract ProtocolTest is Test {
+
+    uint constant LEVERAGE_LIMIT = 15e18;
+
     Protocol protocol;
     PrepToken token;
     Vault vault;
@@ -35,9 +38,142 @@ contract ProtocolTest is Test {
         vm.stopBroadcast();
     }
 
+    function testLiquidateFuncTraderLossIsMoreThanCollateral() public {
+        giveLiquidity();
+        vm.startPrank(msg.sender);        
+        token.mint();
+
+        token.approve(address(protocol), 5000 ether);
+        protocol.depositCollateral(5000 ether);
+        protocol.openPosition(60000 ether, true);
+
+        feed.updateAnswer(55000e8);
+        (,, uint id, , ) = protocol.getPositionDetails(msg.sender);
+        console.log("id", id);
+        (uint256 leverageRate, ) = protocol.checkPositionLeverageAndLiquidability(id);
+         console.log("leverageRate", leverageRate);
+
+        (uint256 sizeBeforeLiqui, ,, ,) = protocol.getPositionDetails(msg.sender);
+        uint collateralBeforeLiqui = protocol.getCollateralBalance();
+        console.log("size Before Liquidation", sizeBeforeLiqui);
+        console.log("collateralBeforeLiqui Before Liquidation", collateralBeforeLiqui);
+        vm.stopPrank();
+
+        vm.startPrank(user);
+        uint balOfVaultbeforeLiq = token.balanceOf(address(vault));
+        protocol.liquidatePosition(id);
+        (uint256 sizeAfterLiqui, ,, ,) = protocol.getPositionDetails(msg.sender);
+        console.log("size After Liquidation", sizeAfterLiqui);
+        uint balOfVaultAfterliq = token.balanceOf(address(vault));
+        vm.stopPrank();
+
+        vm.startPrank(msg.sender);
+        uint collateralAfterLiqui = protocol.getCollateralBalance();
+        console.log("collateral after Liquidation", collateralAfterLiqui);
+        // 11764705882352941307 leverage = 11x so it's does not need closeing
+        console.log("-------------------------------------------------------");
+        (int checkProfitOrLossForUser) = protocol.checkProfitOrLossForUser(msg.sender);
+        vm.stopPrank();
+        console.log("checkProfitOrLossForUser", checkProfitOrLossForUser);
+
+        // vault balances
+        console.log("balOfVaultbeforeLiq", balOfVaultbeforeLiq);  
+        console.log("balOfVaultAfterliq", balOfVaultAfterliq);   
+    }
+
 
     function testLiquidateFunction() public {
+        giveLiquidity();
+        vm.startPrank(msg.sender);        
+        token.mint();
+
+        token.approve(address(protocol), 5000 ether);
+        protocol.depositCollateral(5000 ether);
+        protocol.openPosition(60000 ether, true);
+
+        feed.updateAnswer(57000e8);
+        (,, uint id, , ) = protocol.getPositionDetails(msg.sender);
+        console.log("id", id);
+        (uint256 leverageRate, ) = protocol.checkPositionLeverageAndLiquidability(id);
+         console.log("leverageRate", leverageRate);
+
+        (uint256 sizeBeforeLiqui, ,, ,) = protocol.getPositionDetails(msg.sender);
+        uint collateralBeforeLiqui = protocol.getCollateralBalance();
+        console.log("size Before Liquidation", sizeBeforeLiqui);
+        console.log("collateralBeforeLiqui Before Liquidation", collateralBeforeLiqui);
+        vm.stopPrank();
+
+        uint balOfVaultbeforeLiq = token.balanceOf(address(vault));
+
+        vm.startPrank(user);
+        protocol.liquidatePosition(id);
+        (uint256 sizeAfterLiqui, ,, ,) = protocol.getPositionDetails(msg.sender);
+        vm.stopPrank();
+
+        vm.startPrank(msg.sender);
+        uint collateralAfterLiqui = protocol.getCollateralBalance();
+        // 11764705882352941307 leverage = 11x so it's does not need closeing
+        (uint256 leverageRateafterLiquidatio, ) = protocol.checkPositionLeverageAndLiquidability(id);
+        assert( leverageRateafterLiquidatio <=LEVERAGE_LIMIT);
+        (int checkProfitOrLossForUser) = protocol.checkProfitOrLossForUser(msg.sender);
+        uint balOfVaultAfterliq = token.balanceOf(address(vault));
+        vm.stopPrank();
+        console.log("size After Liquidation", sizeAfterLiqui);
+        console.log("collateral after Liquidation", collateralAfterLiqui);
+        console.log("checkProfitOrLossForUser", checkProfitOrLossForUser);
+
+        console.log("balOfVaultbeforeLiq", balOfVaultbeforeLiq);
+        console.log("balOfVaultAfterliq", balOfVaultAfterliq);
+        // assert((sizeBeforeLiqui*4)/ 3 == sizeAfterLiqui);
+    }
+
+
+    // had to close position when collateral did not decrease
+    function testLiquidateFunctWithBorrowingFeeLeverageDidNotDecrease() public {
+        giveLiquidity();
+        vm.startPrank(msg.sender);        
+        token.mint();
+
+        token.approve(address(protocol), 5000 ether);
+        protocol.depositCollateral(5000 ether);
+        protocol.openPosition(60000 ether, true);
+        vm.warp(block.timestamp + 31536000); // Fast forward 1 year
+
+        feed.updateAnswer(57000e8);
+        (,, uint id, , ) = protocol.getPositionDetails(msg.sender);
+        console.log("id", id);
+        (uint256 leverageRate, ) = protocol.checkPositionLeverageAndLiquidability(id);
+         console.log("leverageRate", leverageRate);
+
+        (uint256 sizeBeforeLiqui, ,, ,) = protocol.getPositionDetails(msg.sender);
+        uint collateralBeforeLiqui = protocol.getCollateralBalance();
+        console.log("size Before Liquidation", sizeBeforeLiqui);
+        console.log("collateralBeforeLiqui Before Liquidation", collateralBeforeLiqui);
+        vm.stopPrank();
+
+        vm.startPrank(user);
+        console.log("-------------------------------------------------------");
+        console.log("balance of protocol", token.balanceOf(address(protocol)));
+        uint balOfVaultbeforeLiq = token.balanceOf(address(vault));
+        protocol.liquidatePosition(id); // After liquidation leverage still more than 15x so the position is closed
+        (uint256 sizeAfterLiqui, ,, ,bool isInitialized) = protocol.getPositionDetails(msg.sender);
+        uint collateralOfLiquidator = protocol.getCollateralBalance();
+        vm.stopPrank();
+
+        vm.startPrank(msg.sender);
+
+        uint collateralOfTraderLiquidated = protocol.getCollateralBalance();
+        uint balOfVaultAfterLiq = token.balanceOf(address(vault));
+        vm.stopPrank();
         
+        assert(isInitialized == false);
+        assert(collateralOfLiquidator == (60000e18*5)/1000); // liquidator paid 0.5% of position size
+        assert(collateralOfTraderLiquidated <= 351e18);
+        console.log("collateral after Liquidation", collateralOfTraderLiquidated);
+        console.log("size After Liquidation", sizeAfterLiqui);
+
+                console.log("balOfVaultbeforeLiq", balOfVaultbeforeLiq);
+        console.log("balOfVaultAfterliq", balOfVaultAfterLiq);
     }
 
 
@@ -62,7 +198,7 @@ contract ProtocolTest is Test {
         vm.warp(block.timestamp + 86400); // Fast forward 1 day
         protocol.decreasePostion(10000 ether);
         console.log("balance After 2nd decrese %e:", protocol.getCollateralBalance());
-        (uint256 size, uint256 sizeOfToken, ,) = protocol.getPositionDetails(msg.sender);
+        (uint256 size, uint256 sizeOfToken,, ,) = protocol.getPositionDetails(msg.sender);
         console.log("size" , size );
         console.log("size of Token" , sizeOfToken );
         assert(size == 40000 ether);
@@ -89,7 +225,7 @@ contract ProtocolTest is Test {
         uint256 id = protocol.getIdByAddress(msg.sender);
         (uint leverage, bool isLiquidabale) = protocol.checkPositionLeverageAndLiquidability(id);
         console.log("leverage", leverage);
-        assert(leverage == 12);
+        assert(leverage == 12e18);
         assert(isLiquidabale == false);
 
         int256 updateAnswer = 45000e8;
@@ -148,13 +284,13 @@ contract ProtocolTest is Test {
         protocol.depositCollateral(100 ether);
 
         protocol.openPosition(1000 ether, false);
-        (uint256 sizeBefore,uint a,,) = protocol.getPositionDetails(msg.sender);
+        (uint256 sizeBefore,,,,) = protocol.getPositionDetails(msg.sender);
         assert (sizeBefore == 1000 ether);
     // @audit issue in this re cheeck it by console where the profit comes from without update in price
 
         console.log("1st Position---------------------------------------");
         protocol.increasePosition(500 ether);
-        (uint256 size, uint256 sizeOfToken, bool isLong, bool isInitialized) = protocol.getPositionDetails(msg.sender);
+        (uint256 size, ,, , ) = protocol.getPositionDetails(msg.sender);
         assert (size == 1500 ether);
         // protocol.liquidityReservesToHold();
         // vm.expectRevert();
@@ -292,7 +428,7 @@ contract ProtocolTest is Test {
         protocol.openPosition(1500 ether, true);
         assert(protocol.getNumOfOpenPositions() == 1);
 
-        (uint256 size, uint256 sizeOfToken, bool isLong,) = protocol.getPositionDetails(msg.sender);
+        (uint256 size, uint256 sizeOfToken, ,bool isLong,) = protocol.getPositionDetails(msg.sender);
         console.log("size:", size);
         console.log("sizeOfToken:", sizeOfToken);
         if (isLong) console.log("isLong: TRUE");
@@ -341,12 +477,12 @@ contract ProtocolTest is Test {
         vault.deposit(5000 ether, user);
         vm.stopPrank();
 
-        // vm.startPrank(user2);
-        // token.mint();
-        // token.approve(address(vault), token.balanceOf(user2));
-        // vault.deposit(5000 ether, user2);
-        // assert(vault.balanceOf(user) == vault.balanceOf(user2));
-        // vm.stopPrank();
+        vm.startPrank(user2);
+        token.mint();
+        token.approve(address(vault), token.balanceOf(user2));
+        vault.deposit(5000 ether, user2);
+        assert(vault.balanceOf(user) == vault.balanceOf(user2));
+        vm.stopPrank();
 
         // vm.startPrank(user3);
         // token.mint();

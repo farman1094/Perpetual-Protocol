@@ -25,7 +25,7 @@ library OracleLib {
     {
         (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound) =
             priceFeed.latestRoundData();
-        uint256 secondsSince = block.timestamp - updatedAt;
+        // uint256 secondsSince = block.timestamp - updatedAt;
         // if (secondsSince > TIMEOUT) revert OracleLib__PriceStale();  //commented for testing
          return (roundId, answer, startedAt, updatedAt, answeredInRound);
     }
