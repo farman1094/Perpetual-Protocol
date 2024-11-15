@@ -483,7 +483,8 @@ contract Protocol is ReentrancyGuard {
 
         int256 borrowedAmount = toInt256(userCheck.size);
         int256 token = toInt256(userCheck.sizeOfToken);
-
+        console.log("borrowedAmount of _checkProfitOrLossForUser", borrowedAmount);
+        console.log("token of _checkProfitOrLossForUser", token);
         int256 PnL;
 
         if (userCheck.isLong) {
@@ -719,6 +720,11 @@ contract Protocol is ReentrancyGuard {
         return positions[sender].id;
     }
 
+
+    // function to get the price of purchase by address
+    function getPriceOfPurchaseByAddress(address sender) public view returns (uint256 price) {
+        return _getPriceOfPurchase(sender);
+    }
    
 }
 

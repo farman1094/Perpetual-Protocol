@@ -35,6 +35,14 @@ contract ProtocolTest is Test {
         vm.stopBroadcast();
     }
 
+
+    function testLiquidateFunction() public {
+        
+    }
+
+
+
+
     function testDecreasePositiRevertDueToHighLeverage() public {
         giveLiquidity();
 
@@ -44,13 +52,24 @@ contract ProtocolTest is Test {
         token.approve(address(protocol), 5000 ether);
         protocol.depositCollateral(5000 ether);
         protocol.openPosition(60000 ether, true);
-        feed.updateAnswer(54000e8);
         
-        vm.warp(block.timestamp + 31536000); // Fast forward 1 hour
+        vm.warp(block.timestamp + 31536000); // Fast forward 1 year
+        feed.updateAnswer(58000e8);
 
         console.log("balance BEfore decrese %e:", protocol.getCollateralBalance());
-
+        protocol.decreasePostion(10000 ether);
         console.log("balance After decrese %e:", protocol.getCollateralBalance());
+        vm.warp(block.timestamp + 86400); // Fast forward 1 day
+        protocol.decreasePostion(10000 ether);
+        console.log("balance After 2nd decrese %e:", protocol.getCollateralBalance());
+        (uint256 size, uint256 sizeOfToken, ,) = protocol.getPositionDetails(msg.sender);
+        console.log("size" , size );
+        console.log("size of Token" , sizeOfToken );
+        assert(size == 40000 ether);
+    // 1e18 - (20000e18 * 1e18) / 60000e18 = 666666666666666800 + 1 (20000e18 worth token decrease)
+        assert(sizeOfToken < 666666666666666801);
+        uint priceOfPurchase = protocol.getPriceOfPurchaseByAddress(msg.sender);
+        console.log("size ", (sizeOfToken * priceOfPurchase)/ 1e18);
     }
 
 
@@ -100,6 +119,8 @@ contract ProtocolTest is Test {
 
 
         
+
+
 
         // uint reward = protocol._calculateLiquidableReward(10000e18);
         // assert(reward == 50e18);
