@@ -1,4 +1,3 @@
-
 // SPDX-License-Identifier: MIT
 
 pragma solidity ^0.8.18;
@@ -12,7 +11,6 @@ import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interf
  * If a price is stable, the function will revert, and render the Protocol unusable - this is by design
  * We want Protocol to freeze if prices become stale
  */
-
 library OracleLib {
     error OracleLib__PriceStale();
 
@@ -27,6 +25,6 @@ library OracleLib {
             priceFeed.latestRoundData();
         // uint256 secondsSince = block.timestamp - updatedAt;
         // if (secondsSince > TIMEOUT) revert OracleLib__PriceStale();  //commented for testing
-         return (roundId, answer, startedAt, updatedAt, answeredInRound);
+        return (roundId, answer, startedAt, updatedAt, answeredInRound);
     }
 }

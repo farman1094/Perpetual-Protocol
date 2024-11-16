@@ -6,7 +6,6 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 interface IVault is IERC4626 {
     error Vault__WithdrawLimitAffectingReserveThreshold();
 
-
     // Once Liquidity providers deposited the money they need to keep 15% of their reserves.
     // It also goes up's and down accroding to the situation of profit and loss
     function withdraw(uint256 assets, address receiver, address owner) external override returns (uint256);
