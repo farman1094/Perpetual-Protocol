@@ -9,6 +9,8 @@ import {SignedMath} from "@openzeppelin/contracts/utils/math/SignedMath.sol";
 
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {OracleLib} from "./libraries/OracleLib.sol";
+import {console} from "forge-std/console.sol";
+
 
 /**
  * @title PrepProtocol
@@ -150,6 +152,10 @@ contract Protocol is ReentrancyGuard {
             // checking leverage is under 15 before as well to be so the gas fee will not be wasted
             revert Protocol__LeverageLimitReached();
         }
+
+        bool reservesAvailable = _isCollateralAvailable(_size);
+        if(!reservesAvailable)revert Protocol__CollateralReserveIsNotAvailable();
+
         uint256 borrowingFee = _calculateBorrowFee(positions[msg.sender].size, positions[msg.sender].openAt); // paid fees till now
         _handleAmountDeduction(msg.sender, borrowingFee); // till now borrowing fee taken
 
@@ -187,8 +193,8 @@ contract Protocol is ReentrancyGuard {
         if (positions[msg.sender].isInitialized) {
             revert Protocol__UserCanOnlyHaveOnePositionOpened();
         }
-        uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
-        if (totalReserve == 0) revert Protocol__CollateralReserveIsNotAvailable();
+        bool reservesAvailable = _isCollateralAvailable(_size);
+        if(!reservesAvailable)revert Protocol__CollateralReserveIsNotAvailable();
 
         bool eligible = _checkLeverageFactorWhileIncreasing(msg.sender, _size);
         if (!eligible) revert Protocol__LeverageLimitReached();
@@ -258,20 +264,40 @@ contract Protocol is ReentrancyGuard {
      *  it returns @param amountToHold Which needed to hold in Vault for clear traders dues
      */
     function liquidityReservesToHold() external view returns (uint256 amountToHold) {
+        return _liquidityReservesToHold();
+    }
+
+    function _liquidityReservesToHold() internal view returns (uint256 amountToHold) {
         uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
-        if (totalReserve == 0) revert Protocol__CurrentlyNumberIsZero();
+        if (totalReserve == 0) revert Protocol__CollateralReserveIsNotAvailable();
         int256 PnLForLongForUser =
             _checkPnLForLong(toInt256(longPosition.totalSize), toInt256(longPosition.totalSizeOfToken));
-
+        console.log("Pnl of Long", PnLForLongForUser);
         int256 PnLForShortUser =
             _checkPnLForShort(toInt256(shortPosition.totalSize), toInt256(shortPosition.totalSizeOfToken));
+        
+                console.log("Pnl of short", PnLForShortUser);
+
+        uint256 totalOpenPosition;
+        uint256 amountToKeep;
+        if(longPosition.totalSize > shortPosition.totalSize){
+            totalOpenPosition = longPosition.totalSize - shortPosition.totalSize;
+        } else {
+            totalOpenPosition = shortPosition.totalSize - longPosition.totalSize;
+        }
+        
+        if (totalOpenPosition == 0) {
+            amountToKeep = 0;
+        } else {
+         amountToKeep = _getTheresholdOfReserve(totalOpenPosition);
+        }
+        console.log("open position 15%", amountToKeep);
 
         int256 totalPnLForUser = PnLForLongForUser + PnLForShortUser;
+        console.log("total PnL of User", totalPnLForUser);
 
-        uint256 amountToKeep = _getAmountToHoldInPool();
         if (totalPnLForUser > 0) {
-            uint256 lossToLPs = totalPnLForUser.abs();
-            amountToHold = amountToKeep + lossToLPs;
+            amountToHold = amountToKeep + totalPnLForUser.abs();
         } else if (totalPnLForUser == 0) {
             amountToHold = amountToKeep;
         } else {
@@ -343,6 +369,17 @@ contract Protocol is ReentrancyGuard {
     //////////////////////////
     // Internals Functions
     //////////////////////////
+    // function to Check if reserves available
+    function _isCollateralAvailable(uint256 _size) internal view returns (bool reservesAvailable){
+        uint256 portionOfSize = _getTheresholdOfReserve(_size);
+        console.log('15% of size', portionOfSize);
+        uint256 amountShoulExistInPool = _liquidityReservesToHold();
+
+        uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
+        console.log("amount Needed", (portionOfSize + amountShoulExistInPool));
+        reservesAvailable = totalReserve < (portionOfSize + amountShoulExistInPool) ? false : true;
+        
+        }
 
     // function to get Real Time collateral of trader Taking care of Profit or Loss
     function _getCurrentCollateralOfUser(address sender) internal view returns (uint256) {
@@ -496,10 +533,10 @@ contract Protocol is ReentrancyGuard {
     }
 
     // Return 15% of totalSupply of Reserves
-    function _getAmountToHoldInPool() internal view returns (uint256 amountToKeep) {
-        uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
+    function _getTheresholdOfReserve(uint256 resereves) internal pure returns (uint256 amountToKeep) {
+        // uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
 
-        amountToKeep = (totalReserve * LIQUIDITY_THRESHOLD) / HELPER_TO_CALCULATE_PERCENTAGE;
+        amountToKeep = (resereves * LIQUIDITY_THRESHOLD) / HELPER_TO_CALCULATE_PERCENTAGE;
         return amountToKeep;
     }
 

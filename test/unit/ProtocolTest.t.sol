@@ -37,7 +37,35 @@ contract ProtocolTest is Test {
         vm.stopBroadcast();
     }
 
+    function testliquidityReservesToHoldwithoutAnyOpenPositionAndLiquidity() public {
+        giveLiquidity(); // 10,000
+        giveLiquidity();
+        vm.startPrank(msg.sender);
+        token.mint();
+
+        token.approve(address(protocol), 6000 ether);
+        protocol.depositCollateral(6000 ether);
+        protocol.openPosition(60000 ether, false);
+        vm.stopPrank();
+
+        console.log("2nd open position--------------");
+        vm.startPrank(user);
+        token.mint();
+        token.approve(address(protocol), 6000 ether);
+        protocol.depositCollateral(6000 ether);
+        protocol.openPosition(65000 ether, true);
+        // vm.expectRevert(Protocol.Protocol__CollateralReserveIsNotAvailable.selector);
+        console.log("loss happen here------------------------");
+        feed.updateAnswer(59000e8); 
+        // total open = 65000 - 60,000 = 5000 * 15% = 750 - traders loss (83$) which is profit to CX so subtracted from 750
+        protocol.increasePosition(2 ether); //   amount Needed 666966666666666647000/1e18 => 667 approx  
+        uint amountNeeded = protocol.liquidityReservesToHold();
+        assert(amountNeeded < 667 ether);
+        vm.stopPrank();
+    } 
+
     function testIdsWokingFineAndPricePurchase() public {
+        giveLiquidity();
         giveLiquidity();
         vm.startPrank(msg.sender);
         token.mint();
@@ -326,6 +354,7 @@ contract ProtocolTest is Test {
         // uint256 borrowingFee = protocol.calculateBorrowFee(10000 ether, 0);
         // console.log("borrowingFee", borrowingFee);
         testForLiquidityResreves();
+        giveLiquidity();
         vm.startPrank(msg.sender);
         token.mint();
 
@@ -467,7 +496,7 @@ contract ProtocolTest is Test {
 
     function testToCheckLPsWithdraw() public {
         testForLiquidityResreves();
-
+        giveLiquidity();
         vm.startPrank(user5);
         token.mint();
         token.approve(address(protocol), 100 ether);
