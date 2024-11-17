@@ -192,13 +192,14 @@ contract Protocol is ReentrancyGuard {
         openPosition(_size, numOfToken, _isLong);
     }
 
-    /**@param _numOfToken you can open position with token */
-     function openPositionWithToken(uint256 _numOfToken, bool _isLong) external moreThanZero(_numOfToken) {
+    /**
+     * @param _numOfToken you can open position with token
+     */
+    function openPositionWithToken(uint256 _numOfToken, bool _isLong) external moreThanZero(_numOfToken) {
         int256 actualValueOfToken = _getActualValueOfToken(toInt256(_numOfToken));
-        uint size = actualValueOfToken.abs();
+        uint256 size = actualValueOfToken.abs();
         openPosition(size, _numOfToken, _isLong);
     }
-
 
     // Function to close the position and clear the dues, For both Profit and loss cases.
     function closePosition() external {
@@ -304,8 +305,8 @@ contract Protocol is ReentrancyGuard {
     // Internals Functions
     //////////////////////////
 
-        // function to get Open Position
-        function openPosition(uint256 _size,uint256 numOfToken, bool _isLong) internal {
+    // function to get Open Position
+    function openPosition(uint256 _size, uint256 numOfToken, bool _isLong) internal {
         if (positions[msg.sender].isInitialized) {
             revert Protocol__UserCanOnlyHaveOnePositionOpened();
         }
@@ -644,7 +645,7 @@ contract Protocol is ReentrancyGuard {
     }
 
     // According to size how much token get // (size should be in 1e18)
-    function _getNumOfTokenByAmount(uint256 amount) internal view returns (uint256) {
+    function _getNumOfTokenByAmount(uint256 amount) internal view moreThanZero(amount) returns (uint256) {
         uint256 priceOfBtc = _getPriceOfBtc();
         uint256 numOfToken = (amount * PRECISION) / priceOfBtc;
         return numOfToken;
@@ -731,26 +732,11 @@ contract Protocol is ReentrancyGuard {
         return _getPriceOfBtc();
     }
 
-    // Get num of token you get in provided amount
-    function getNumOfTokenByAmount(uint256 amount) public view returns (uint256) {
-        return _getNumOfTokenByAmount(amount);
-    }
-
-    // Check your size limit if it can be approved (If already deposited)
-    function checkLeverageFactorWhileIncreasing(address sender, uint256 _size) public view returns (bool) {
-        return _checkLeverageFactorWhileIncreasing(sender, _size);
-    }
-
     // // Calculate the borrowing fee for test
     function getIdByAddress(address sender) public view returns (uint256 id) {
         if (positions[sender].isInitialized == false) {
             return 0;
         }
         return positions[sender].id;
-    }
-
-    // function to get the price of purchase by address
-    function getPriceOfPurchaseByAddress(address sender) public view returns (uint256 price) {
-        return _getPriceOfPurchase(sender);
     }
 }

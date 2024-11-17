@@ -17,4 +17,8 @@ contract PrepToken is ERC20 {
     function mint() external {
         _mint(msg.sender, 6000 ether);
     }
+
+    function mintRandom(uint256 amount) external {
+        _mint(msg.sender, amount);
+    }
 }

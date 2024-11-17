@@ -1,26 +1,23 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
 import {Test, console} from "forge-std/Test.sol";
 import {Protocol} from "src/Protocol.sol";
 
-import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Vault} from "src/Vault.sol";
 import {PrepToken} from "src/PrepToken.sol";
 
-import {Script} from "forge-std/Script.sol";
 import {console} from "forge-std/console.sol";
-import {MockERC20} from "test/mocks/MockERC20.sol";
 import {MockPriceFeed} from "test/mocks/MockPriceFeed.sol";
+import {Deployer} from "script/Deployer.s.sol";
 
 contract ProtocolTest is Test {
     uint256 constant LEVERAGE_LIMIT = 15e18;
 
-    Protocol protocol;
-    PrepToken token;
-    Vault vault;
     MockPriceFeed feed;
+    PrepToken token;
+    Protocol protocol;
+    Vault vault;
     address user = makeAddr("user");
     address user2 = makeAddr("user2");
     address user3 = makeAddr("user3");
@@ -28,13 +25,28 @@ contract ProtocolTest is Test {
     address user5 = makeAddr("user5");
 
     function setUp() public {
-        vm.startBroadcast(msg.sender);
-        feed = new MockPriceFeed();
-        token = new PrepToken();
-        protocol = new Protocol(address(token), msg.sender, address(feed));
-        vault = new Vault(address(token), protocol);
-        protocol.updateVaultAddress(address(vault));
-        vm.stopBroadcast();
+        Deployer deployer = new Deployer();
+        (feed, token, protocol, vault) = deployer.run();
+    }
+
+    function testOpenSizeWithToken() public {
+        giveLiquidity(); // 10,000
+        giveLiquidity(); // 20,000
+        giveLiquidity(); // 30,000
+        vm.startPrank(msg.sender);
+        token.mint();
+        token.approve(address(protocol), 6000 ether);
+        protocol.depositCollateral(6000 ether);
+        protocol.openPositionWithToken(1 ether, false);
+        vm.stopPrank();
+
+        vm.startPrank(user);
+        token.mint();
+        token.approve(address(protocol), 6000 ether);
+        protocol.depositCollateral(6000 ether);
+        vm.expectRevert(Protocol.Protocol__LeverageLimitReached.selector);
+        protocol.openPositionWithToken(2 ether, false);
+        vm.stopPrank();
     }
 
     function testliquidityReservesToHoldwithoutAnyOpenPositionAndLiquidity() public {
@@ -98,11 +110,8 @@ contract ProtocolTest is Test {
         protocol.depositCollateral(6000 ether);
         protocol.openPositionWithSize(60000 ether, true);
         (uint256 idOfUser2,,,,,) = protocol.getPositionDetails(user2);
-        uint256 priceOfPurchase = protocol.getPriceOfPurchaseByAddress(user2);
-        uint256 priceOfToken = protocol.getPriceOfBtc();
         vm.stopPrank();
 
-        assert(priceOfPurchase == priceOfToken);
         assert(idOfUser2 == idOfUser);
     }
 
@@ -344,8 +353,6 @@ contract ProtocolTest is Test {
         assert(size == 40000 ether);
         // 1e18 - (20000e18 * 1e18) / 60000e18 = 666666666666666800 + 1 (20000e18 worth token decrease)
         assert(sizeOfToken < 666666666666666801);
-        uint256 priceOfPurchase = protocol.getPriceOfPurchaseByAddress(msg.sender);
-        console.log("size ", (sizeOfToken * priceOfPurchase) / 1e18);
     }
 
     function testBorrowingFees() public {
@@ -537,9 +544,6 @@ contract ProtocolTest is Test {
         //    console.log(sizeOfToken);
         //    console.log(isLong);
         //    console.log(isInitialized);
-        bool check = protocol.checkLeverageFactorWhileIncreasing(user, 1000 ether);
-        console.log(check);
-        assert(check == false);
 
         assert(num == 0);
     }
@@ -597,8 +601,6 @@ contract ProtocolTest is Test {
         protocol.getCollateralBalance();
         protocol.getVaultAddress();
         protocol.getPriceOfBtc();
-        protocol.getNumOfTokenByAmount(1 ether);
-        protocol.checkLeverageFactorWhileIncreasing(msg.sender, 100);
     }
 
     function giveLiquidity() internal {
