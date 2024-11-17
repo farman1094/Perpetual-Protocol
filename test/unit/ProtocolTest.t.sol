@@ -56,13 +56,13 @@ contract ProtocolTest is Test {
         protocol.openPosition(65000 ether, true);
         // vm.expectRevert(Protocol.Protocol__CollateralReserveIsNotAvailable.selector);
         console.log("loss happen here------------------------");
-        feed.updateAnswer(59000e8); 
+        feed.updateAnswer(59000e8);
         // total open = 65000 - 60,000 = 5000 * 15% = 750 - traders loss (83$) which is profit to CX so subtracted from 750
-        protocol.increasePosition(2 ether); //   amount Needed 666966666666666647000/1e18 => 667 approx  
-        uint amountNeeded = protocol.liquidityReservesToHold();
+        protocol.increasePosition(2 ether); //   amount Needed 666966666666666647000/1e18 => 667 approx
+        uint256 amountNeeded = protocol.liquidityReservesToHold();
         assert(amountNeeded < 667 ether);
         vm.stopPrank();
-    } 
+    }
 
     function testIdsWokingFineAndPricePurchase() public {
         giveLiquidity();

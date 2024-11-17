@@ -9,8 +9,6 @@ import {SignedMath} from "@openzeppelin/contracts/utils/math/SignedMath.sol";
 
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import {OracleLib} from "./libraries/OracleLib.sol";
-import {console} from "forge-std/console.sol";
-
 
 /**
  * @title PrepProtocol
@@ -154,7 +152,7 @@ contract Protocol is ReentrancyGuard {
         }
 
         bool reservesAvailable = _isCollateralAvailable(_size);
-        if(!reservesAvailable)revert Protocol__CollateralReserveIsNotAvailable();
+        if (!reservesAvailable) revert Protocol__CollateralReserveIsNotAvailable();
 
         uint256 borrowingFee = _calculateBorrowFee(positions[msg.sender].size, positions[msg.sender].openAt); // paid fees till now
         _handleAmountDeduction(msg.sender, borrowingFee); // till now borrowing fee taken
@@ -194,7 +192,7 @@ contract Protocol is ReentrancyGuard {
             revert Protocol__UserCanOnlyHaveOnePositionOpened();
         }
         bool reservesAvailable = _isCollateralAvailable(_size);
-        if(!reservesAvailable)revert Protocol__CollateralReserveIsNotAvailable();
+        if (!reservesAvailable) revert Protocol__CollateralReserveIsNotAvailable();
 
         bool eligible = _checkLeverageFactorWhileIncreasing(msg.sender, _size);
         if (!eligible) revert Protocol__LeverageLimitReached();
@@ -267,46 +265,6 @@ contract Protocol is ReentrancyGuard {
         return _liquidityReservesToHold();
     }
 
-    function _liquidityReservesToHold() internal view returns (uint256 amountToHold) {
-        uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
-        if (totalReserve == 0) revert Protocol__CollateralReserveIsNotAvailable();
-        int256 PnLForLongForUser =
-            _checkPnLForLong(toInt256(longPosition.totalSize), toInt256(longPosition.totalSizeOfToken));
-        console.log("Pnl of Long", PnLForLongForUser);
-        int256 PnLForShortUser =
-            _checkPnLForShort(toInt256(shortPosition.totalSize), toInt256(shortPosition.totalSizeOfToken));
-        
-                console.log("Pnl of short", PnLForShortUser);
-
-        uint256 totalOpenPosition;
-        uint256 amountToKeep;
-        if(longPosition.totalSize > shortPosition.totalSize){
-            totalOpenPosition = longPosition.totalSize - shortPosition.totalSize;
-        } else {
-            totalOpenPosition = shortPosition.totalSize - longPosition.totalSize;
-        }
-        
-        if (totalOpenPosition == 0) {
-            amountToKeep = 0;
-        } else {
-         amountToKeep = _getTheresholdOfReserve(totalOpenPosition);
-        }
-        console.log("open position 15%", amountToKeep);
-
-        int256 totalPnLForUser = PnLForLongForUser + PnLForShortUser;
-        console.log("total PnL of User", totalPnLForUser);
-
-        if (totalPnLForUser > 0) {
-            amountToHold = amountToKeep + totalPnLForUser.abs();
-        } else if (totalPnLForUser == 0) {
-            amountToHold = amountToKeep;
-        } else {
-            uint256 profitToLps = totalPnLForUser.abs();
-            amountToHold = profitToLps >= amountToKeep ? 0 : amountToKeep - profitToLps;
-        }
-        return amountToHold;
-    }
-
     /* NOTE
     * this function will liquidate position if position has more than 30x leverage, and reward 0.5% of liquidable position to the liquidator.
     * if Collateral have the money to pay the reward, otherwise it will pay the reward from the collateral 
@@ -369,17 +327,51 @@ contract Protocol is ReentrancyGuard {
     //////////////////////////
     // Internals Functions
     //////////////////////////
+
+    // Explained in funciton liquidityReservesToHold
+    function _liquidityReservesToHold() internal view returns (uint256 amountToHold) {
+        uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
+        if (totalReserve == 0) revert Protocol__CollateralReserveIsNotAvailable();
+        int256 PnLForLongForUser =
+            _checkPnLForLong(toInt256(longPosition.totalSize), toInt256(longPosition.totalSizeOfToken));
+        int256 PnLForShortUser =
+            _checkPnLForShort(toInt256(shortPosition.totalSize), toInt256(shortPosition.totalSizeOfToken));
+
+        uint256 totalOpenPosition;
+        uint256 amountToKeep;
+        if (longPosition.totalSize > shortPosition.totalSize) {
+            totalOpenPosition = longPosition.totalSize - shortPosition.totalSize;
+        } else {
+            totalOpenPosition = shortPosition.totalSize - longPosition.totalSize;
+        }
+
+        if (totalOpenPosition == 0) {
+            amountToKeep = 0;
+        } else {
+            amountToKeep = _getTheresholdOfReserve(totalOpenPosition);
+        }
+
+        int256 totalPnLForUser = PnLForLongForUser + PnLForShortUser;
+
+        if (totalPnLForUser > 0) {
+            amountToHold = amountToKeep + totalPnLForUser.abs();
+        } else if (totalPnLForUser == 0) {
+            amountToHold = amountToKeep;
+        } else {
+            uint256 profitToLps = totalPnLForUser.abs();
+            amountToHold = profitToLps >= amountToKeep ? 0 : amountToKeep - profitToLps;
+        }
+        return amountToHold;
+    }
+
     // function to Check if reserves available
-    function _isCollateralAvailable(uint256 _size) internal view returns (bool reservesAvailable){
+    function _isCollateralAvailable(uint256 _size) internal view returns (bool reservesAvailable) {
         uint256 portionOfSize = _getTheresholdOfReserve(_size);
-        console.log('15% of size', portionOfSize);
         uint256 amountShoulExistInPool = _liquidityReservesToHold();
 
         uint256 totalReserve = IERC20(i_acceptedCollateral).balanceOf(address(vault));
-        console.log("amount Needed", (portionOfSize + amountShoulExistInPool));
         reservesAvailable = totalReserve < (portionOfSize + amountShoulExistInPool) ? false : true;
-        
-        }
+    }
 
     // function to get Real Time collateral of trader Taking care of Profit or Loss
     function _getCurrentCollateralOfUser(address sender) internal view returns (uint256) {
@@ -431,7 +423,7 @@ contract Protocol is ReentrancyGuard {
     }
 
     /**
-     * NOTE internal function of handling the decreasing,  
+     * NOTE internal function of handling the decreasing,
      * @param sizeToDec it is the size to be decreased from current position. New Position = (position - sizeToDec)
      * It will take the borrowing fee till now, and distribute the portion of ProfitOrLoss according to the size which is decreasing.
      */
