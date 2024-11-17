@@ -1,172 +1,202 @@
+Here's an updated and detailed **README.md** file for your Minimal Perpetual Trading Protocol:
+
+---
+
 # Minimal Perpetual Trading Protocol
 
-This protocol is designed as a minimal, proof-of-concept implementation of a perpetual trading system. While streamlined compared to real-world perpetual trading protocols, it incorporates core features to allow leveraged trading on BTC, including long and short positions, collateral management, and liquidity provision.
-
-### Addresses
-PrepToken Address :  
-Vault Address:  
-Protocol Address: 
-
+This protocol is a foundational, decentralized system for perpetual trading on BTC. It integrates core functionalities such as leveraged trading, collateral management, liquidity provisioning, and liquidation mechanisms. Designed for simplicity and robustness, it provides a secure environment for traders and liquidity providers (LPs) while incorporating advanced features like real-time leverage calculations, borrowing fees, and dynamic reserve management.
 
 ---
 
 ## Table of Contents
-1. [Protocol Overview](#protocol-overview)
+1. [Overview](#overview)
 2. [Key Features](#key-features)
 3. [Role of Parties](#role-of-parties)
-4. [Smart Contracts and Functions](#smart-contracts-and-functions)
-5. [Usage Instructions](#usage-instructions)
-6. [Important Links](#important-links)
+4. [Smart Contracts](#smart-contracts)
+5. [Key Functions](#key-functions)
+6. [Usage Instructions](#usage-instructions)
+7. [Important Links](#important-links)
 
 ---
 
-## Protocol Overview
+## Overview
 
-The Minimal Perpetual Trading Protocol facilitates leveraged trading on BTC, enabling traders to take long or short positions. The protocol is balanced by liquidity providers (LPs) who deposit funds into a shared vault, covering potential trading losses and receiving leverage fees in return. This system manages trades and collateral through a series of smart contracts and is designed for simplicity, minimizing additional protocol fees and complex features.
+The Minimal Perpetual Trading Protocol facilitates leveraged trading on BTC through a decentralized system. Traders can open long or short positions, while liquidity providers back the system with funds. The protocol ensures stability via collateralized reserves, borrowing fees, and liquidation mechanisms. By streamlining essential trading features, this protocol serves as a proof-of-concept for perpetual trading systems.
 
 ---
 
 ## Key Features
 
-- **Leveraged BTC Trading**: Allows traders to open long (betting on price increase) or short (betting on price decrease) positions on BTC.
-- **Collateral Management**: Traders deposit collateral, and LPs back the system by providing liquidity.
-- **Profit and Loss Distribution**: Profits and losses are balanced across opposing positions; if necessary, the vault covers excess losses.
-- **Liquidity Provider Vault**: LPs deposit funds into the vault, where funds are distributed as shares using the ERC-4626 standard, granting LPs a proportional share in vault profits and losses.
-- **Flexible Withdrawal Constraints for LPs**: LPs must retain a percentage of their assets in the vault to ensure protocol stability.
+- **Leveraged Trading**: Offers up to 15x leverage for traders, with real-time leverage tracking to ensure system stability.
+- **Dynamic Reserve Management**: Maintains 15% reserves for open positions, adjusting based on profit and loss scenarios.
+- **Borrowing Fees**: Traders pay a borrowing fee on reserves held by the protocol, calculated at 15% annually.
+- **Collateral Flexibility**: Traders can withdraw collateral even with open positions, provided leverage remains within limits.
+- **Liquidation Mechanism**: Automatically liquidates positions exceeding 30x leverage, rewarding liquidators with 0.5% of the liquidated position.
+- **ERC-4626 Vault**: Implements tokenized liquidity shares for LPs, dynamically adjusting based on protocol profits and losses.
 
 ---
 
 ## Role of Parties
 
 ### 1. Traders
-Traders deposit collateral to open leveraged positions on BTC, which can be long or short. They use the `Protocol` contract to manage trades, deposit collateral, and calculate their leverage.
+Traders open leveraged positions on BTC by depositing collateral. They can manage positions using functions for increasing, decreasing, or closing trades.
 
 ### 2. Liquidity Providers (LPs)
-LPs contribute liquidity to the protocol’s `Vault`, enabling the system to cover potential trader losses. In return, LPs earn leverage fees and receive shares in the vault, calculated based on the ERC-4626 standard.
+LPs deposit funds into the protocol’s vault to provide liquidity. In return, they earn fees and receive proportional shares of vault profits.
 
 ### 3. Admin
-The Admin is responsible for setting the vault address within the protocol. This role has limited involvement in day-to-day operations but is essential for initial protocol setup.
+The Admin configures initial protocol settings, such as vault address. 
+
+### 4. Liquidators (Arbitary actors)
+Independent actors who monitor leverage levels. Liquidators can close over-leveraged positions for a 0.5% reward of the liquidated position size.
 
 ---
 
-## Smart Contracts and Functions
+## Smart Contracts
 
-### 1. **Prep Token**
+### 1. **PrepToken**
+An ERC-20 token pegged to $1, used as collateral for traders and liquidity providers.
 
-The `PrepToken` is an ERC-20 token used within the protocol, pegged to $1 for simplicity. It serves as collateral for both traders and liquidity providers (LPs) when interacting with other contracts in the protocol. The token has 18 decimals (`1e18` PPT = $1), facilitating easy calculations and uniformity across contract interactions.
+### 2. **Vault (ERC-4626)**
+Holds liquidity from LPs, distributing shares proportionally. Reserves are dynamically adjusted based on trader activity.
 
-### 2. **Vault (Liquidity Provider Vault)**
+### 3. **Protocol**
+The core contract managing trader positions, collateral, leverage, and liquidation processes.
 
-The `Vault` contract, using the ERC-4626 standard, stores funds deposited by LPs. In exchange, LPs receive shares representing their proportional ownership of the vault’s assets. These shares are dynamically adjusted based on the protocol's profit and loss to maintain protocol stability. The vault interacts directly with the protocol in profit and loss scenarios:
+---
 
-- **Profit Distribution**: Funds are pulled from the vault to pay out traders’ profits.
-- **Loss Coverage**: Losses are returned to the vault, which are then proportionally distributed back to LPs based on their shares.
+## Key Functions
 
-#### Withdrawal Constraints for LPs:
-   - LPs must retain a percentage (default 15%) of their collateral in the vault. This percentage adjusts based on protocol profits or losses to ensure consistent liquidity.
-   - Example: If the protocol has a 15% reserve requirement and LP deposits $100, they can withdraw up to $85, with $15 reserved.
+### Trader Functions
 
-### 3. **Protocol (Core Trading Contract)**
+#### **Opening Positions**
+1. **`openPositionWithSize(uint256 _size, bool _isLong)`**
+   - Opens a position by specifying the size.
+   - Validates that the vault holds 15% of the position size for reserves.
 
-The `Protocol` contract manages trader actions, including depositing collateral, opening positions, adjusting leverage, and handling profit/loss scenarios. Below are detailed descriptions of key functions:
+2. **`openPositionWithToken(uint256 _sizeOfToken, bool _isLong)`**
+   - Opens a position by specifying the token amount.
+   - Automatically calculates the position size based on the BTC price.
 
-#### Core Functions for Traders
+#### **Managing Positions**
+1. **`increasePosition(uint256 _size)`**
+   - Adds to an open position. Allowed even in loss, provided leverage remains ≤ 15x.
 
+2. **`decreasePosition(uint256 _size)`**
+   - Reduces the size of an open position, adjusting collateral and profit/loss proportionally.
+
+3. **`closePosition()`**
+   - Fully closes a position, settling any profit or loss.
+
+#### **Collateral Management**
 1. **`depositCollateral(uint256 amount)`**
-   - **Purpose**: Allows traders to deposit collateral into the protocol, which is then used to determine leverage eligibility.
-   - **Parameters**:
-     - `amount` (uint256): The amount of `PrepToken` (PPT) the trader wishes to deposit (e.g., `1e18` PPT = $1).
-   - **Usage**:
-     - Before depositing, the trader must approve the `Protocol` contract to spend `PrepToken` using `approve(address spender, uint256 amount)`.
-     - Upon depositing, this collateral becomes the basis for the trader's leverage limit.
-   - **Example**:
-     - If a trader deposits `100 PPT`, they can borrow up to 15x that amount.
+   - Deposits collateral into the protocol.
 
-2. **`openPosition(uint256 _size, uint256 _sizeOfToken, bool _isLong)`**
-   - **Purpose**: Opens a leveraged position, either long (betting BTC will increase) or short (betting BTC will decrease).
-   - **Parameters**:
-     - `_size` (uint256): The total amount the trader wishes to borrow (leverage).
-     - `_sizeOfToken` (uint256): The number of BTC tokens desired. If set to `0`, the contract will automatically calculate the number of tokens based on `_size` and BTC price. It take value with 18 decimal (1e18 = 1) (1e17 = 0.1).
-     - `_isLong` (bool): `true` if the trader is opening a long position, `false` for a short position.
-   - **Usage**:
-     - `_size` must be less than or equal to `depositCollateral * 15`.
-     - `_sizeOfToken` * `BTC Price` should also be ≤ `_size` (or the function calculates `_sizeOfToken` if set to `0`).
-   - **Example**:
-     - A trader with `100 PPT` collateral can open a long position with `_size` up to `1500 PPT`.
+2. **`withdrawCollateral(uint256 amount)`**
+   - Withdraws collateral, even with open positions, if leverage remains ≤ 15x.
 
-3. **`increasePosition(uint256 additionalSize)`**
-   - **Purpose**: Increases an existing position if the trader has unused collateral for leverage. Traders in a loss cannot increase their position until they close it.
-   - **Parameters**:
-     - `additionalSize` (uint256): The additional leverage amount the trader wishes to add to their open position.
-   - **Usage**:
-     - Traders must still stay within their leverage limit.
-   - **Example**:
-     - If the trader has an open position of `1000 PPT` but unused leverage of `500 PPT`, they can call `increasePosition(500)` to maximize leverage.
+#### **Liquidation**
+1. **`checkPositionLeverageAndLiquidability(uint id)`**
+   - Checks if a position exceeds 30x leverage and is liquidatable.
 
-4. **`closePosition()`**
-   - **Purpose**: Closes an open position and settles any profit or loss. The protocol deducts losses from the trader's collateral, while profits are paid out.
-   - **Parameters**: None.
-   - **Usage**:
-     - If a loss exceeds the trader’s collateral, all collateral is taken, but no further tracking occurs for uncovered losses.
-   - **Example**:
-     - If the trader’s collateral is `100 PPT` and the position closes with a `150 PPT` loss, the entire `100 PPT` collateral is forfeited.
+2. **`liquidatePosition(uint id)`**
+   - Liquidates a position exceeding 30x leverage, reducing its size by one-third and awarding 0.5% of the position size to the liquidator.
 
-5. **`withdrawCollateral(uint256 amount)`**
-   - **Purpose**: Withdraws the trader's collateral from the protocol, provided there are no open positions.
-   - **Parameters**:
-     - `amount` (uint256): The amount of collateral the trader wishes to withdraw.
-   - **Usage**:
-     - This function only works if the trader has no active positions.
-   - **Example**:
-     - A trader with `100 PPT` in collateral can withdraw the full amount after closing all positions.
-
-
-  
 ---
 
-#### Additional Trader Functions:
-   - `getPositionDetails(address user)`: Retrieve a trader’s position.
-   - `getPriceOfBtc()`: Fetches the current BTC price.
-   - `getNumOfTokenByAmount(uint256 amount)`: Calculates BTC tokens by amount.
-   - `checkLeverageFactor(address sender, uint256 _size)`: Checks leverage eligibility.
-   - `getVaultAddress()` and `getCollateralAddress()`: Accesses protocol contract addresses.
+### LP Functions
+
+1. **`deposit(uint256 amount)`**
+   - Deposits liquidity into the vault, receiving proportional shares.
+
+2. **`withdraw(uint256 amount)`**
+   - Withdraws liquidity, adhering to reserve constraints.
+
+3. **`redeem(uint256 shares)`**
+   - Redeems shares for underlying assets.
+
+---
+### **Position Management**
+
+Position management covers the processes for LPs withdrawing funds, users opening positions, and ensuring the protocol's liquidity reserves are maintained. Below are the key aspects and functions involved:
+
+### Liquidity Reserves Calculation: `liquidityReservesToHold()`
+
+- **Purpose**: The **`liquidityReservesToHold()`** function calculates the amount of reserves required to support both existing and new positions.
+- **Calculation**: The reserves are now determined by **15% of the difference** between long and short positions, considering any **profits and losses** from previous trades. This ensures the protocol has enough liquidity to support ongoing trades.
+- **Usage**:
+  - **LPs with Drawn Funds**: Before LPs can withdraw money, the protocol checks if  this withdrawal will not affect the current position existed, based on this calculated reserve. If the current reserves are sufficient after the withdrawal to cover the positions’s then good otherwise, the action will be halted.
+  - **New Positions**: Before users can open new positions, the protocol checks that there are enough reserves available to maintain both the new position and existing ones. This ensures that the liquidity vault is sufficiently funded to handle new trades without compromising existing positions.
+
+---
+
+### Calculations and Fees
+
+#### **Real-Time Leverage**
+Calculated as:  
+`leverage = position / (collateral + PnL)`  
+- Profit is added. 
+- loss is subtracted.
+
+#### **Borrowing Fee**
+- Annual fee: 15% of reserves held for the position.
+- Formula:  
+  `borrowingFee = reserveAmount * timePassed * (15% / 1 year)`
+
+#### **Liquidation Fee**
+- 0.5% of the liquidated position size.
 
 ---
 
 ## Usage Instructions
 
-### **For Traders**
+### For Traders
 
-1. **Obtain Prep Tokens**: Use the `mint()` function in `PrepToken` to acquire $100 (100 PPT).
-2. **Approve Protocol**: In the `PrepToken` contract, approve the `Protocol` contract to use your tokens with `approve(address spender, uint256 amount)`.
-3. **Deposit Collateral**: Call `depositCollateral(uint256 amount)` to fund your account.
-4. **Open Position**: Use `openPosition(uint256 _size, uint256 _sizeOfToken, bool _isLong)` to start trading.
-   - Example: `_isLong = true` for long positions (expecting BTC price increase), `_isLong = false` for short positions.
-5. **Increase or Close Positions**: 
-   - Increase position size if eligible (no active loss).
-   - Close positions to settle dues or withdraw funds.
-6. **Withdraw Collateral**: Once all positions are closed, use the `withdrawCollateral()` function to reclaim your funds.
+1. **Acquire Prep Tokens**: Use the `mint()` function in the `PrepToken` contract.
+2. **Approve Protocol**: Allow the `Protocol` contract to spend tokens with `approve()`.
+3. **Deposit Collateral**: Use `depositCollateral()` to fund your account.
+4. **Open Positions**: Use either `openPositionWithSize()` or `openPositionWithToken()` based on preference.
+5. **Manage Positions**:
+   - Increase: Use `increasePosition()`.
+   - Decrease: Use `decreasePosition()`.
+   - Close: Use `closePosition()`.
+6. **Withdraw Collateral**: Call `withdrawCollateral()` after closing positions or ensuring leverage ≤ 15x.
 
-### **For Liquidity Providers**
+### For LPs
 
-1. **Obtain Prep Tokens**: Use the `mint()` function in `PrepToken` to get $100 (100 PPT).
-2. **Approve Protocol**: Grant the `Vault` contract approval in `PrepToken` using `approve(address spender, uint256 amount)`.
-3. **Deposit or Mint Shares**:
-   - **Deposit**: Use the deposit function to specify assets, receiving corresponding shares.
-   - **Mint**: Specify the share amount to mint; the vault calculates the asset equivalent.
-4. **Withdraw or Redeem Shares**:
-   - **Withdraw**: Enter the asset amount to withdraw, and receive proportional shares.
-   - **Redeem**: Input the share amount to redeem, receiving corresponding assets.
-   - **Holding Requirements**: LPs must maintain a minimum collateral percentage as described above.
----
+1. **Acquire Prep Tokens**: Use the `mint()` function.
+2. **Approve Vault**: Allow the vault to spend tokens with `approve()`.
+3. **Deposit Liquidity**: Use `deposit()` to receive proportional shares.
+4. **Withdraw or Redeem**:
+   - Withdraw: Specify the asset amount.
+   - Redeem: Specify the share amount.
+
+### For Liquidators
+
+1. **Monitor Positions**:  
+   Use the `getNumOfOpenPositionsIds()` function to retrieve the list of open positions. For example, if it returns 5, the open position IDs are `(1, 2, 3, 4, 5)`. If it returns 0, there are no open positions at the moment.
+
+2. **Identify Unused IDs**:  
+   Use `getIdsNotInUse()` to get the IDs that are not assigned to any active positions. For example, if it returns `[3, 4]`, it means these IDs are available, and the open positions are `[1, 2, 5]`.
+
+3. **Check Leverage and Liquidation Status**:  
+   For each open position ID, use `checkPositionLeverageAndLiquidability(uint id)` to check if it is eligible for liquidation. This function returns a tuple:  
+   `(uint256 leverageRate, bool isLiquidable)`  
+   - `leverageRate`: The current leverage of the position.
+   - `isLiquidable`: Whether the position is liquidable based on its leverage rate.  
+   A position is liquidatable if `leverageRate > 30x` and `isLiquidable` is `true`.
+
+4. **Liquidate Position**:  
+   If the position is liquidatable, use `liquidatePosition(uint id)` to liquidate that position. Liquidating a position rewards the liquidator with 0.5% of the position's size, which will be added to the liquidator’s balance. This reward can be withdrawn using the `withdrawCollateral()` function or used for further trading.  
+   **Note**: A trader cannot liquidate their own position.
+
+--- 
+
 ## Important Links
 
-For further details, in-depth guides, and community support, please refer to the following resources:
+- [ERC-20 Overview](https://docs.openzeppelin.com/contracts/4.x/erc20)  
+- [ERC-4626 Overview](https://docs.openzeppelin.com/contracts/4.x/erc4626)  
 
-- **ERC-20 Overview**: [OpenZeppelin ERC-20 Documentation](https://docs.openzeppelin.com/contracts/4.x/erc20)  
-  A detailed explanation of the ERC-20 standard, which the `PrepToken` contract follows to ensure compatibility and seamless interactions across the protocol.
+--- 
 
-- **ERC-4626 Overview**: [OpenZeppelin ERC-4626 Documentation](https://docs.openzeppelin.com/contracts/4.x/erc4626)  
-  Reference on ERC-4626, the tokenized vault standard used in the protocol’s `Vault` contract, detailing the liquidity management approach.
-
-This protocol offers a streamlined, decentralized trading environment where both traders and liquidity providers participate in a balanced and minimized perpetual trading structure. Through careful contract design and limited but flexible roles, the protocol serves as a foundational template for perpetual trading systems.
+This protocol provides a streamlined and secure environment for perpetual trading, balancing simplicity with robust risk management. Whether you're a trader, LP, or liquidator, the system ensures transparency, fairness, and efficiency.

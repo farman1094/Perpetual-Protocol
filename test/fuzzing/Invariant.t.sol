@@ -43,7 +43,7 @@ contract Invariant is StdInvariant, Test {
         protocol.getTotalLongPositions();
         protocol.getTotalShortPositions();
         protocol.getPositionDetails(randdomAddress);
-        protocol.getNumOfOpenPositions();
+        protocol.getNumOfOpenPositionsIds();
         protocol.getCollateralBalance();
         protocol.getCollateralAddress();
         protocol.getPriceOfBtc();

@@ -708,7 +708,7 @@ contract Protocol is ReentrancyGuard {
     }
 
     // Get number of Open Positions
-    function getNumOfOpenPositions() public view returns (uint256) {
+    function getNumOfOpenPositionsIds() public view returns (uint256) {
         return s_numOfOpenPositions;
     }
 

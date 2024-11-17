@@ -558,7 +558,7 @@ contract ProtocolTest is Test {
 
         // Opening Positions ------------------------------------
         protocol.openPositionWithSize(1500 ether, true);
-        assert(protocol.getNumOfOpenPositions() == 1);
+        assert(protocol.getNumOfOpenPositionsIds() == 1);
         // return (id, size, sizeOfToken, openAt, isLong, isInitialized);
 
         (, uint256 size, uint256 sizeOfToken,, bool isLong,) = protocol.getPositionDetails(msg.sender);
@@ -597,7 +597,7 @@ contract ProtocolTest is Test {
         protocol.getTotalLongPositions();
         protocol.getTotalShortPositions();
         protocol.getPositionDetails(msg.sender);
-        protocol.getNumOfOpenPositions();
+        protocol.getNumOfOpenPositionsIds();
         protocol.getCollateralBalance();
         protocol.getVaultAddress();
         protocol.getPriceOfBtc();
