@@ -30,7 +30,7 @@ The Minimal Perpetual Trading Protocol facilitates leveraged trading on BTC thro
 ## Key Features
 
 - **Leveraged Trading**: Offers up to 15x leverage for traders, with real-time leverage tracking to ensure system stability.
-- **Dynamic Reserve Management**: Maintains 15% reserves for open positions, adjusting based on profit and loss scenarios.
+- **Dynamic Reserve Management**:  Maintains 15% reserves for open positions, adjusting based on profit and loss scenarios, as well as the difference between long and short positions.
 - **Borrowing Fees**: Traders pay a borrowing fee on reserves held by the protocol, calculated at 15% annually.
 - **Collateral Flexibility**: Traders can withdraw collateral even with open positions, provided leverage remains within limits.
 - **Liquidation Mechanism**: Automatically liquidates positions exceeding 30x leverage, rewarding liquidators with 0.5% of the liquidated position.
