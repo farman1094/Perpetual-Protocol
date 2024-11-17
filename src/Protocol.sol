@@ -187,42 +187,18 @@ contract Protocol is ReentrancyGuard {
      * @param _size the borrowing amount or position,
      * @param _isLong (send true for long, false for short)
      */
-    function openPosition(uint256 _size, bool _isLong) external moreThanZero(_size) {
-        if (positions[msg.sender].isInitialized) {
-            revert Protocol__UserCanOnlyHaveOnePositionOpened();
-        }
-        bool reservesAvailable = _isCollateralAvailable(_size);
-        if (!reservesAvailable) revert Protocol__CollateralReserveIsNotAvailable();
-
-        bool eligible = _checkLeverageFactorWhileIncreasing(msg.sender, _size);
-        if (!eligible) revert Protocol__LeverageLimitReached();
-
-        s_numOfOpenPositions++;
-        uint256 _id;
-
-        if (s_availableIdsToUse.length > 0) {
-            _id = s_availableIdsToUse[s_availableIdsToUse.length - 1];
-            s_availableIdsToUse.pop();
-        } else {
-            _id = s_numOfOpenPositions;
-        }
+    function openPositionWithSize(uint256 _size, bool _isLong) external moreThanZero(_size) {
         uint256 numOfToken = _getNumOfTokenByAmount(_size);
-
-        positions[msg.sender] = Position({
-            id: _id,
-            size: _size,
-            sizeOfToken: numOfToken,
-            openAt: block.timestamp,
-            isLong: _isLong,
-            isInitialized: true
-        });
-        positionsById[_id] = positions[msg.sender];
-        s_AddressById[_id] = msg.sender;
-        emit PositionUpdated(msg.sender, _size);
-
-        // get the total of short or long;
-        updateTotalAccountingForAdding(_isLong, _size, numOfToken);
+        openPosition(_size, numOfToken, _isLong);
     }
+
+    /**@param _numOfToken you can open position with token */
+     function openPositionWithToken(uint256 _numOfToken, bool _isLong) external moreThanZero(_numOfToken) {
+        int256 actualValueOfToken = _getActualValueOfToken(toInt256(_numOfToken));
+        uint size = actualValueOfToken.abs();
+        openPosition(size, _numOfToken, _isLong);
+    }
+
 
     // Function to close the position and clear the dues, For both Profit and loss cases.
     function closePosition() external {
@@ -327,6 +303,43 @@ contract Protocol is ReentrancyGuard {
     //////////////////////////
     // Internals Functions
     //////////////////////////
+
+        // function to get Open Position
+        function openPosition(uint256 _size,uint256 numOfToken, bool _isLong) internal {
+        if (positions[msg.sender].isInitialized) {
+            revert Protocol__UserCanOnlyHaveOnePositionOpened();
+        }
+        bool reservesAvailable = _isCollateralAvailable(_size);
+        if (!reservesAvailable) revert Protocol__CollateralReserveIsNotAvailable();
+
+        bool eligible = _checkLeverageFactorWhileIncreasing(msg.sender, _size);
+        if (!eligible) revert Protocol__LeverageLimitReached();
+
+        s_numOfOpenPositions++;
+        uint256 _id;
+
+        if (s_availableIdsToUse.length > 0) {
+            _id = s_availableIdsToUse[s_availableIdsToUse.length - 1];
+            s_availableIdsToUse.pop();
+        } else {
+            _id = s_numOfOpenPositions;
+        }
+
+        positions[msg.sender] = Position({
+            id: _id,
+            size: _size,
+            sizeOfToken: numOfToken,
+            openAt: block.timestamp,
+            isLong: _isLong,
+            isInitialized: true
+        });
+        positionsById[_id] = positions[msg.sender];
+        s_AddressById[_id] = msg.sender;
+        emit PositionUpdated(msg.sender, _size);
+
+        // get the total of short or long;
+        updateTotalAccountingForAdding(_isLong, _size, numOfToken);
+    }
 
     // Explained in funciton liquidityReservesToHold
     function _liquidityReservesToHold() internal view returns (uint256 amountToHold) {

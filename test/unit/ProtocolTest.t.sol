@@ -45,7 +45,7 @@ contract ProtocolTest is Test {
 
         token.approve(address(protocol), 6000 ether);
         protocol.depositCollateral(6000 ether);
-        protocol.openPosition(60000 ether, false);
+        protocol.openPositionWithSize(60000 ether, false);
         vm.stopPrank();
 
         console.log("2nd open position--------------");
@@ -53,7 +53,7 @@ contract ProtocolTest is Test {
         token.mint();
         token.approve(address(protocol), 6000 ether);
         protocol.depositCollateral(6000 ether);
-        protocol.openPosition(65000 ether, true);
+        protocol.openPositionWithSize(65000 ether, true);
         // vm.expectRevert(Protocol.Protocol__CollateralReserveIsNotAvailable.selector);
         console.log("loss happen here------------------------");
         feed.updateAnswer(59000e8);
@@ -72,7 +72,7 @@ contract ProtocolTest is Test {
 
         token.approve(address(protocol), 6000 ether);
         protocol.depositCollateral(6000 ether);
-        protocol.openPosition(60000 ether, true);
+        protocol.openPositionWithSize(60000 ether, true);
         (uint256 id,,,,,) = protocol.getPositionDetails(msg.sender);
         console.log(id);
         vm.stopPrank();
@@ -81,7 +81,7 @@ contract ProtocolTest is Test {
         token.mint();
         token.approve(address(protocol), 6000 ether);
         protocol.depositCollateral(6000 ether);
-        protocol.openPosition(60000 ether, true);
+        protocol.openPositionWithSize(60000 ether, true);
         (uint256 idOfUser,,,,,) = protocol.getPositionDetails(user);
         vm.stopPrank();
 
@@ -96,7 +96,7 @@ contract ProtocolTest is Test {
         token.mint();
         token.approve(address(protocol), 6000 ether);
         protocol.depositCollateral(6000 ether);
-        protocol.openPosition(60000 ether, true);
+        protocol.openPositionWithSize(60000 ether, true);
         (uint256 idOfUser2,,,,,) = protocol.getPositionDetails(user2);
         uint256 priceOfPurchase = protocol.getPriceOfPurchaseByAddress(user2);
         uint256 priceOfToken = protocol.getPriceOfBtc();
@@ -113,7 +113,7 @@ contract ProtocolTest is Test {
 
         token.approve(address(protocol), 6000 ether);
         protocol.depositCollateral(6000 ether);
-        protocol.openPosition(60000 ether, true);
+        protocol.openPositionWithSize(60000 ether, true);
         vm.warp(block.timestamp + 31536000);
         protocol.decreasePosition(4000 ether);
         protocol.decreasePosition(4000 ether);
@@ -128,7 +128,7 @@ contract ProtocolTest is Test {
 
         token.approve(address(protocol), 6000 ether);
         protocol.depositCollateral(6000 ether);
-        protocol.openPosition(60000 ether, true);
+        protocol.openPositionWithSize(60000 ether, true);
         vm.warp(block.timestamp + 31536000);
         protocol.increasePosition(4000 ether);
         protocol.increasePosition(4000 ether);
@@ -149,7 +149,7 @@ contract ProtocolTest is Test {
 
         token.approve(address(protocol), 6000 ether);
         protocol.depositCollateral(6000 ether);
-        protocol.openPosition(60000 ether, true);
+        protocol.openPositionWithSize(60000 ether, true);
         feed.updateAnswer(59000e8);
         // collateral 4000 (1000 loss)
         uint256 userCollateralBeforeWith = protocol.getCollateralBalance();
@@ -168,7 +168,7 @@ contract ProtocolTest is Test {
 
         token.approve(address(protocol), 5000 ether);
         protocol.depositCollateral(5000 ether);
-        protocol.openPosition(60000 ether, true);
+        protocol.openPositionWithSize(60000 ether, true);
 
         vm.warp(block.timestamp + 31536000);
         feed.updateAnswer(55000e8);
@@ -189,7 +189,7 @@ contract ProtocolTest is Test {
 
         token.approve(address(protocol), 5000 ether);
         protocol.depositCollateral(5000 ether);
-        protocol.openPosition(60000 ether, true);
+        protocol.openPositionWithSize(60000 ether, true);
 
         feed.updateAnswer(55000e8);
 
@@ -233,7 +233,7 @@ contract ProtocolTest is Test {
 
         token.approve(address(protocol), 5000 ether);
         protocol.depositCollateral(5000 ether);
-        protocol.openPosition(60000 ether, true);
+        protocol.openPositionWithSize(60000 ether, true);
 
         feed.updateAnswer(57000e8);
         (uint256 id,,,,,) = protocol.getPositionDetails(msg.sender);
@@ -279,7 +279,7 @@ contract ProtocolTest is Test {
 
         token.approve(address(protocol), 5000 ether);
         protocol.depositCollateral(5000 ether);
-        protocol.openPosition(60000 ether, true);
+        protocol.openPositionWithSize(60000 ether, true);
         vm.warp(block.timestamp + 31536000); // Fast forward 1 year
 
         feed.updateAnswer(57000e8);
@@ -327,7 +327,7 @@ contract ProtocolTest is Test {
 
         token.approve(address(protocol), 5000 ether);
         protocol.depositCollateral(5000 ether);
-        protocol.openPosition(60000 ether, true);
+        protocol.openPositionWithSize(60000 ether, true);
 
         vm.warp(block.timestamp + 31536000); // Fast forward 1 year
         feed.updateAnswer(58000e8);
@@ -360,7 +360,7 @@ contract ProtocolTest is Test {
 
         token.approve(address(protocol), 5000 ether);
         protocol.depositCollateral(5000 ether);
-        protocol.openPosition(60000 ether, false);
+        protocol.openPositionWithSize(60000 ether, false);
         uint256 id = protocol.getIdByAddress(msg.sender);
         (uint256 leverage, bool isLiquidabale) = protocol.checkPositionLeverageAndLiquidability(id);
         console.log("leverage", leverage);
@@ -415,11 +415,9 @@ contract ProtocolTest is Test {
         token.approve(address(protocol), 100 ether);
         protocol.depositCollateral(100 ether);
 
-        protocol.openPosition(1000 ether, false);
+        protocol.openPositionWithSize(1000 ether, false);
         (, uint256 sizeBefore,,,,) = protocol.getPositionDetails(msg.sender);
         assert(sizeBefore == 1000 ether);
-        // @audit issue in this re cheeck it by console where the profit comes from without update in price
-
         console.log("1st Position---------------------------------------");
         protocol.increasePosition(500 ether);
         (, uint256 size,,,,) = protocol.getPositionDetails(msg.sender);
@@ -468,7 +466,7 @@ contract ProtocolTest is Test {
         token.approve(address(protocol), 100 ether);
         protocol.depositCollateral(100 ether);
 
-        protocol.openPosition(1500 ether, false);
+        protocol.openPositionWithSize(1500 ether, false);
         vm.expectRevert();
         protocol.increasePosition(600 ether);
 
@@ -481,7 +479,7 @@ contract ProtocolTest is Test {
         token.mint();
         token.approve(address(protocol), 100 ether);
         protocol.depositCollateral(100 ether);
-        protocol.openPosition(1500 ether, false);
+        protocol.openPositionWithSize(1500 ether, false);
 
         // Closing Positions -----------------------------------
         int256 updateAnswer = 64000e8;
@@ -501,14 +499,14 @@ contract ProtocolTest is Test {
         token.mint();
         token.approve(address(protocol), 100 ether);
         protocol.depositCollateral(100 ether);
-        protocol.openPosition(1000 ether, true);
+        protocol.openPositionWithSize(1000 ether, true);
         vm.stopPrank();
 
         vm.startPrank(msg.sender);
         token.mint();
         token.approve(address(protocol), 100 ether);
         protocol.depositCollateral(100 ether);
-        protocol.openPosition(1500 ether, false);
+        protocol.openPositionWithSize(1500 ether, false);
 
         // Price update
         int256 updateAnswer = 5400000000000;
@@ -555,7 +553,7 @@ contract ProtocolTest is Test {
         assert(protocol.getCollateralBalance() == 100 ether);
 
         // Opening Positions ------------------------------------
-        protocol.openPosition(1500 ether, true);
+        protocol.openPositionWithSize(1500 ether, true);
         assert(protocol.getNumOfOpenPositions() == 1);
         // return (id, size, sizeOfToken, openAt, isLong, isInitialized);
 
