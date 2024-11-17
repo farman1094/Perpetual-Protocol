@@ -1,11 +1,13 @@
-Here's an updated and detailed **README.md** file for your Minimal Perpetual Trading Protocol:
-
----
-
 # Minimal Perpetual Trading Protocol
 
-This protocol is a foundational, decentralized system for perpetual trading on BTC. It integrates core functionalities such as leveraged trading, collateral management, liquidity provisioning, and liquidation mechanisms. Designed for simplicity and robustness, it provides a secure environment for traders and liquidity providers (LPs) while incorporating advanced features like real-time leverage calculations, borrowing fees, and dynamic reserve management.
+This protocol is a foundational, decentralized system for perpetual trading on BTC. It integrates core functionalities such as leveraged trading, collateral management, liquidity provisioning, and liquidation mechanisms. Designed for simplicity and robustness, it provides a secure environment for traders and liquidity providers (LPs) while incorporating advanced features like real-time leverage calculations, borrowing fees, and dynamic reserve management.    
 
+
+### Addresses
+**Protocol:**  
+ **Vault:**  
+ **PrepToken:** 
+ 
 ---
 
 ## Table of Contents
