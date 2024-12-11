@@ -1,0 +1,7 @@
+### Side Quest Yul & Memory
+This is also from the project
+
+1. In the safeTransferFrom function, what does 0x23b872dd000000000000000000000000 represent and what does it mean when used in the following context on line 192: mstore(0x0c, 0x23b872dd000000000000000000000000).
+- This small part here is the signature `0x23b872dd000000000000000000000000` of the funciton `transferFrom(address,address,uint)` which is going to use the function for calling. In context of the line  `mstore(0x0c, 0x23b872dd000000000000000000000000)` It's a command in Yul to add this in memory It just shown `0x23b872dd000000000000000000000000` But actually this word is `0000000000000000000000000000000023b872dd000000000000000000000000` because as the data pushed to memory it's done in 32 bytes so here this is the whole word command mentioning. It also mentioned to start storing from `0x0c` (12 bytes in dec) so this long word as initial padding of 16 bytes and 4 data signature. So this word becomes `0000000000000000000000000000000000000000000000000000000023b872dd` like as we want. And In line `mstore(0x2c, shl(96, from))` it storing form 0x2c (44 in dec) saving initial 12 bytes becuase which going to override by this `0x23b872dd000000000000000000000000` signature extra 0's. 
+
+In call we `call(gas(), token, 0, 0x1c, 0x64, 0x00, 0x20)` we start taking input from 0x1c (28 in dec) this where signature start and data length is 0x64 (100). So the data is managed this way 4 byte sig, 32 byte addr. 32 byte addr, 32 byte uint input.
